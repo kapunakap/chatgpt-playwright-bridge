@@ -1,0 +1,55 @@
+name: playwright-mcp-aws
+
+services:
+  playwright:
+    image: ${PLAYWRIGHT_MCP_IMAGE:-mcr.microsoft.com/playwright/mcp:v0.0.75}
+    init: true
+    command:
+      - --port
+      - "8931"
+      - --host
+      - 0.0.0.0
+      - --allowed-hosts
+      - playwright,localhost,127.0.0.1
+      - --shared-browser-context
+      - --user-data-dir
+      - /data/profile
+      - --output-dir
+      - /data/output
+    expose:
+      - "8931"
+    shm_size: 512m
+    volumes:
+      - playwright-data:/data
+    restart: unless-stopped
+    networks:
+      - mcp
+
+  tunnel:
+    image: ${TUNNEL_CLIENT_IMAGE:-ghcr.io/openai/tunnel-client:v0.0.10}
+    environment:
+      CONTROL_PLANE_TUNNEL_ID: ${OPENAI_TUNNEL_ID:?OPENAI_TUNNEL_ID is required}
+      MCP_SERVER_URL: http://playwright:8931/mcp
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: json
+      HEALTH_LISTEN_ADDR: 127.0.0.1:8080
+    command:
+      - --control-plane.api-key=file:/run/secrets/openai_runtime_api_key
+    secrets:
+      - openai_runtime_api_key
+    depends_on:
+      - playwright
+    restart: unless-stopped
+    networks:
+      - mcp
+
+networks:
+  mcp:
+    driver: bridge
+
+volumes:
+  playwright-data:
+
+secrets:
+  openai_runtime_api_key:
+    file: ${OPENAI_RUNTIME_API_KEY_FILE:?OPENAI_RUNTIME_API_KEY_FILE is required}

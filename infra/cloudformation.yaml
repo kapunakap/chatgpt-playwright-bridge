@@ -1,0 +1,184 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Minimal self-hosted Playwright MCP on EC2 with an outbound-only OpenAI Secure MCP Tunnel.
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: t4g.small
+    Description: EC2 instance type. Default is Graviton t4g.small.
+  Architecture:
+    Type: String
+    Default: arm64
+    AllowedValues: [arm64, x86_64]
+    Description: Must match the selected EC2 instance type.
+  VolumeSize:
+    Type: Number
+    Default: 20
+    MinValue: 8
+    MaxValue: 100
+  TunnelId:
+    Type: String
+    AllowedPattern: '^tunnel_[0-9a-f]{32}$'
+    ConstraintDescription: Must be an OpenAI tunnel id such as tunnel_0123456789abcdef0123456789abcdef.
+  RuntimeApiKeyParameterName:
+    Type: String
+    Default: /playwright-mcp-aws/openai-runtime-api-key
+    AllowedPattern: '^/[A-Za-z0-9_.\-/]+$'
+    Description: Existing SSM SecureString containing the OpenAI runtime API key.
+  RepositoryRawBaseUrl:
+    Type: String
+    Default: https://raw.githubusercontent.com/kapunakap/playwright-mcp-aws/main
+    Description: Raw URL for this public repository/ref. Override for forks.
+  PlaywrightMcpImage:
+    Type: String
+    Default: mcr.microsoft.com/playwright/mcp:v0.0.75
+  TunnelClientImage:
+    Type: String
+    Default: ghcr.io/openai/tunnel-client:v0.0.10
+  DockerComposeVersion:
+    Type: String
+    Default: v5.4.0
+
+Conditions:
+  UseArm64: !Equals [!Ref Architecture, arm64]
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.42.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-vpc'
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  GatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.42.0.0/24
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-public'
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+
+  DefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayAttachment
+    Properties:
+      RouteTableId: !Ref RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RouteTable
+      SubnetId: !Ref PublicSubnet
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: No inbound access; outbound browser/tunnel traffic only.
+      VpcId: !Ref Vpc
+      SecurityGroupIngress: []
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-sg'
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
+      Policies:
+        - PolicyName: ReadOpenAiRuntimeKey
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ssm:GetParameter
+                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${RuntimeApiKeyParameterName}'
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref InstanceRole]
+
+  BrowserInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !If
+        - UseArm64
+        - '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64}}'
+        - '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}'
+      IamInstanceProfile: !Ref InstanceProfile
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds: [!Ref SecurityGroup]
+      MetadataOptions:
+        HttpEndpoint: enabled
+        HttpTokens: required
+        HttpPutResponseHopLimit: 1
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            Encrypted: true
+            DeleteOnTermination: true
+            VolumeType: gp3
+            VolumeSize: !Ref VolumeSize
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-browser'
+      UserData:
+        Fn::Base64: !Sub |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          work=/tmp/playwright-mcp-aws
+          mkdir -p "$work/scripts"
+          curl -fsSL '${RepositoryRawBaseUrl}/docker-compose.yml' -o "$work/docker-compose.yml"
+          curl -fsSL '${RepositoryRawBaseUrl}/scripts/start.sh' -o "$work/scripts/start.sh"
+          curl -fsSL '${RepositoryRawBaseUrl}/scripts/bootstrap.sh' -o "$work/scripts/bootstrap.sh"
+          chmod +x "$work/scripts/start.sh" "$work/scripts/bootstrap.sh"
+          export OPENAI_TUNNEL_ID='${TunnelId}'
+          export SSM_API_KEY_PARAMETER='${RuntimeApiKeyParameterName}'
+          export PLAYWRIGHT_MCP_IMAGE='${PlaywrightMcpImage}'
+          export TUNNEL_CLIENT_IMAGE='${TunnelClientImage}'
+          export DOCKER_COMPOSE_VERSION='${DockerComposeVersion}'
+          "$work/scripts/bootstrap.sh"
+
+Outputs:
+  InstanceId:
+    Value: !Ref BrowserInstance
+  VpcId:
+    Value: !Ref Vpc
+  SecurityGroupId:
+    Value: !Ref SecurityGroup
+  SsmStartSessionCommand:
+    Value: !Sub 'aws ssm start-session --target ${BrowserInstance}'
