@@ -29,7 +29,8 @@ The template intentionally pins AL2023 to the kernel 6.1 AMI family instead of `
 1. An AWS account and CLI credentials that can deploy CloudFormation/IAM/EC2/SSM resources.
 2. An OpenAI Secure MCP Tunnel ID (`tunnel_...`).
 3. An OpenAI **runtime** API key with `Tunnels Read + Use` for that tunnel.
-4. This repository must be publicly readable by the EC2 bootstrap, or `RepositoryRawBaseUrl` must point to another public fork/ref.
+
+The repository may remain private. The CloudFormation template embeds the small runtime files needed at first boot, so EC2 does not need a GitHub token or repository access.
 
 Do **not** commit the OpenAI runtime API key. It belongs in SSM Parameter Store as a `SecureString`.
 
@@ -71,7 +72,6 @@ Useful overrides:
 InstanceType=t4g.small
 Architecture=arm64
 VolumeSize=20
-RepositoryRawBaseUrl=https://raw.githubusercontent.com/YOU/playwright-mcp-aws/main
 PlaywrightMcpImage=mcr.microsoft.com/playwright/mcp:v0.0.75
 TunnelClientImage=ghcr.io/openai/tunnel-client:v0.0.10
 ```
@@ -138,9 +138,9 @@ That is the MVP definition of done.
 - The OpenAI runtime key is read from SSM `SecureString` into `/run` at service start and mounted into the tunnel container as a file.
 - EC2 requires IMDSv2 and sets the response hop limit to 1, reducing metadata exposure from bridged containers.
 - Playwright MCP is **not** itself a security boundary. A browser automation service can reach arbitrary websites, so this stack uses a dedicated VPC rather than joining unrelated private infrastructure.
-- The browser profile can contain authenticated cookies. Treat the EC2/EBS volume as sensitive even though the repository is public.
+- The browser profile can contain authenticated cookies. Treat the EC2/EBS volume as sensitive even if the repository is later made public.
 - The browser data directory is created on the EC2 host with uid/gid `1000`, matching the non-root `node` user in the official Playwright MCP image.
 
 ## Configuration philosophy
 
-The MVP intentionally keeps the knobs small: instance type/architecture, disk size, upstream image versions, repository ref, tunnel ID, and SSM parameter name. Everything else has an opinionated default to reduce debugging surface.
+The MVP intentionally keeps the knobs small: instance type/architecture, disk size, upstream image versions, tunnel ID, and SSM parameter name. Everything else has an opinionated default to reduce debugging surface.
