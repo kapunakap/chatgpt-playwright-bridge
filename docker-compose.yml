@@ -20,7 +20,7 @@ services:
       - "8931"
     shm_size: 512m
     volumes:
-      - playwright-data:/data
+      - ${PLAYWRIGHT_DATA_DIR:-/var/lib/playwright-mcp-aws}:/data
     restart: unless-stopped
     networks:
       - mcp
@@ -46,9 +46,6 @@ services:
 networks:
   mcp:
     driver: bridge
-
-volumes:
-  playwright-data:
 
 secrets:
   openai_runtime_api_key:

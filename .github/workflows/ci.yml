@@ -30,8 +30,9 @@ jobs:
 
       - name: Reject obvious committed secrets
         run: |
-          if grep -RInE --exclude-dir=.git --exclude='.env.example' \
-            '(sk-[A-Za-z0-9_-]{20,}|OPENAI_(API|ADMIN)_KEY=.+|CONTROL_PLANE_API_KEY=.+)' .; then
+          if git grep -nE \
+            '(sk-[A-Za-z0-9_-]{20,}|OPENAI_(API|ADMIN)_KEY=.+|CONTROL_PLANE_API_KEY=.+)' \
+            -- . ':(exclude).env.example' ':(exclude).github/workflows/ci.yml'; then
             echo 'Potential secret committed.' >&2
             exit 1
           fi

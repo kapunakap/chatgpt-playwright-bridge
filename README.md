@@ -12,15 +12,17 @@ The MCP port is never published to the Internet. The EC2 security group has no i
 
 - AWS region: `us-east-1`
 - EC2: `t4g.small` (ARM64/Graviton)
-- OS: Amazon Linux 2023
+- OS: Amazon Linux 2023, kernel 6.1 AMI family
 - Playwright MCP: `mcr.microsoft.com/playwright/mcp:v0.0.75`
 - OpenAI tunnel-client: `ghcr.io/openai/tunnel-client:v0.0.10`
 - Docker Compose: `v5.4.0`
 - Root disk: 20 GiB encrypted gp3
-- Browser profile: persistent Docker volume
+- Browser profile: persistent EBS-backed host directory
 - Public inbound ports: none
 
 Both upstream containers publish Linux ARM64 builds. If ARM64 causes a real runtime problem, deploy with `Architecture=x86_64` and an x86 instance type such as `t3a.small`.
+
+The template intentionally pins AL2023 to the kernel 6.1 AMI family instead of `kernel-default`. AWS changed the default AL2023 kernel from 6.1 to 6.18 on August 17, 2026; pinning 6.1 removes that fresh variable from the MVP. The AMI itself still resolves through AWS's version-specific public SSM alias, so patched 6.1 images continue to be selected.
 
 ## Prerequisites
 
@@ -137,6 +139,7 @@ That is the MVP definition of done.
 - EC2 requires IMDSv2 and sets the response hop limit to 1, reducing metadata exposure from bridged containers.
 - Playwright MCP is **not** itself a security boundary. A browser automation service can reach arbitrary websites, so this stack uses a dedicated VPC rather than joining unrelated private infrastructure.
 - The browser profile can contain authenticated cookies. Treat the EC2/EBS volume as sensitive even though the repository is public.
+- The browser data directory is created on the EC2 host with uid/gid `1000`, matching the non-root `node` user in the official Playwright MCP image.
 
 ## Configuration philosophy
 

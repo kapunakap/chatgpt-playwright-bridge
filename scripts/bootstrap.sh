@@ -10,6 +10,7 @@ SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
 PLAYWRIGHT_MCP_IMAGE="${PLAYWRIGHT_MCP_IMAGE:-mcr.microsoft.com/playwright/mcp:v0.0.75}"
 TUNNEL_CLIENT_IMAGE="${TUNNEL_CLIENT_IMAGE:-ghcr.io/openai/tunnel-client:v0.0.10}"
+PLAYWRIGHT_DATA_DIR="${PLAYWRIGHT_DATA_DIR:-/var/lib/playwright-mcp-aws}"
 LOG_LEVEL="${LOG_LEVEL:-info}"
 
 if command -v dnf >/dev/null 2>&1; then
@@ -39,12 +40,17 @@ install -d -m 0755 "${APP_DIR}"
 install -m 0644 "${SOURCE_DIR}/docker-compose.yml" "${APP_DIR}/docker-compose.yml"
 install -m 0755 "${SOURCE_DIR}/scripts/start.sh" "${APP_DIR}/start.sh"
 
+# The official Playwright MCP image runs as the Node image's uid/gid 1000.
+# Make the persistent EBS-backed bind mount writable without running MCP as root.
+install -d -o 1000 -g 1000 -m 0700 "${PLAYWRIGHT_DATA_DIR}"
+
 cat > "${APP_DIR}/.env" <<ENV
 PLAYWRIGHT_MCP_IMAGE=${PLAYWRIGHT_MCP_IMAGE}
 TUNNEL_CLIENT_IMAGE=${TUNNEL_CLIENT_IMAGE}
 OPENAI_TUNNEL_ID=${OPENAI_TUNNEL_ID}
 SSM_API_KEY_PARAMETER=${SSM_API_KEY_PARAMETER}
 OPENAI_RUNTIME_API_KEY_FILE=/run/playwright-mcp-aws/openai_runtime_api_key
+PLAYWRIGHT_DATA_DIR=${PLAYWRIGHT_DATA_DIR}
 LOG_LEVEL=${LOG_LEVEL}
 ENV
 chmod 0600 "${APP_DIR}/.env"

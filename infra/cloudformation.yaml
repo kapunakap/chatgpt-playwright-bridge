@@ -97,7 +97,6 @@ Resources:
     Properties:
       GroupDescription: No inbound access; outbound browser/tunnel traffic only.
       VpcId: !Ref Vpc
-      SecurityGroupIngress: []
       SecurityGroupEgress:
         - IpProtocol: '-1'
           CidrIp: 0.0.0.0/0
@@ -137,8 +136,8 @@ Resources:
       InstanceType: !Ref InstanceType
       ImageId: !If
         - UseArm64
-        - '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64}}'
-        - '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}'
+        - '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-arm64}}'
+        - '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64}}'
       IamInstanceProfile: !Ref InstanceProfile
       SubnetId: !Ref PublicSubnet
       SecurityGroupIds: [!Ref SecurityGroup]
@@ -160,6 +159,7 @@ Resources:
         Fn::Base64: !Sub |
           #!/usr/bin/env bash
           set -euo pipefail
+          command -v curl >/dev/null 2>&1 || dnf install -y curl-minimal
           work=/tmp/playwright-mcp-aws
           mkdir -p "$work/scripts"
           curl -fsSL '${RepositoryRawBaseUrl}/docker-compose.yml' -o "$work/docker-compose.yml"
