@@ -34,6 +34,26 @@ The repository may remain private. The CloudFormation template embeds the small 
 
 Do **not** commit the OpenAI runtime API key. It belongs in SSM Parameter Store as a `SecureString`.
 
+## 0. Create the OpenAI Secure MCP Tunnel
+
+In the OpenAI Platform tunnel settings, create a tunnel such as `playwright-mcp-aws`.
+
+When creating it, select **both**:
+
+- **Organization** — the OpenAI Platform organization that owns the tunnel and runtime API key.
+- **ChatGPT workspace** — the ChatGPT workspace that should be allowed to use the tunnel.
+
+For a personal setup, choose your personal Platform organization and your personal ChatGPT workspace. Selecting the ChatGPT workspace is important so the tunnel can be used from ChatGPT; selecting the organization ties it to the Platform-side API permissions.
+
+A description such as `Private tunnel to self-hosted Playwright MCP on AWS` is sufficient.
+
+After creation:
+
+1. Copy the resulting `tunnel_...` ID. The tunnel ID is configuration, not a secret.
+2. Create a **Restricted** OpenAI runtime API key with only **Tunnels: Read + Use** permissions.
+3. Treat the `sk-...` runtime key as a secret. Do not commit it, paste it into issues, or place it in `.env` files tracked by Git.
+4. Store the runtime key in AWS SSM Parameter Store as described below.
+
 ## 1. Store the runtime key
 
 Choose the same region you will deploy into (default `us-east-1`):
