@@ -10,7 +10,7 @@ services:
       - --host
       - 0.0.0.0
       - --allowed-hosts
-      - playwright,localhost,127.0.0.1
+      - playwright:8931,playwright,localhost:8931,localhost,127.0.0.1:8931,127.0.0.1
       - --shared-browser-context
       - --user-data-dir
       - /data/profile
