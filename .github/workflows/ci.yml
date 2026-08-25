@@ -19,8 +19,8 @@ jobs:
       - name: Compose config
         run: |
           cp .env.example .env
-          mkdir -p /run/playwright-mcp-aws
-          printf 'not-a-real-key\n' > /run/playwright-mcp-aws/openai_runtime_api_key
+          export OPENAI_RUNTIME_API_KEY_FILE="${RUNNER_TEMP}/openai_runtime_api_key"
+          printf 'not-a-real-key\n' > "${OPENAI_RUNTIME_API_KEY_FILE}"
           docker compose --env-file .env config >/dev/null
 
       - name: CloudFormation lint
