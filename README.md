@@ -3,7 +3,7 @@
 Self-host the official Microsoft Playwright MCP on a small AWS EC2 instance and connect it to ChatGPT through OpenAI Secure MCP Tunnel.
 
 ```text
-ChatGPT -> OpenAI Secure MCP Tunnel -> EC2 -> Playwright MCP -> Chromium
+ChatGPT -> OpenAI Secure MCP Tunnel -> EC2 -> internal Nginx compatibility proxy -> Playwright MCP -> Chromium
 ```
 
 The MCP port is never published to the Internet. The EC2 security group has no inbound rules; both the tunnel and Chromium make outbound connections only. Administration is through AWS Systems Manager Session Manager (SSM), not SSH.
@@ -15,6 +15,8 @@ The MCP port is never published to the Internet. The EC2 security group has no i
 - OS: Amazon Linux 2023, kernel 6.1 AMI family
 - Playwright MCP: `mcr.microsoft.com/playwright/mcp:v0.0.75`
 - OpenAI tunnel-client: official stable v0.0.11 GHCR ARM64 digest `ghcr.io/openai/tunnel-client@sha256:c22610c17e4f624fa8114fb93d7d5df915ce7a4d3fe115a6c41ba4677ea54819`
+- Internal compatibility proxy: official Nginx `1.29.8-alpine` multi-architecture digest
+  `nginx:1.29.8-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de`
 - Docker Compose: `v5.4.0`
 - Root disk: 20 GiB encrypted gp3
 - Browser profile: persistent EBS-backed host directory
@@ -138,6 +140,12 @@ sudo docker compose --env-file .env logs --tail=100
 ```
 
 Compose waits for the Playwright MCP HTTP endpoint before starting the tunnel client, and reports tunnel readiness through its container health check. Both services should be running and healthy before running the smoke test.
+
+## Temporary MCP compatibility proxy
+
+The internal `mcp-proxy` service exists only because Playwright MCP currently returns `400 Invalid request` for its absent OAuth Protected Resource Metadata paths, while tunnel-client's no-auth discovery path expects `404`. Nginx returns `404` only for those two exact metadata paths and proxies all other MCP traffic to Playwright, including session and authorization headers and streaming requests.
+
+Remove `mcp-proxy` and `mcp-proxy.conf` when either upstream changes this behavior: restore the tunnel target to `http://playwright:8931/mcp`, restore the direct Playwright dependency, remove the bootstrap/template config embedding, redeploy cleanly, and re-run readiness, smoke, persistence, and reboot checks.
 
 ## 4. Local EC2 smoke test
 

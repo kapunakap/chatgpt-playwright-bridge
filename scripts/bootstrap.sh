@@ -44,6 +44,7 @@ docker compose version
 
 install -d -m 0755 "${APP_DIR}"
 install -m 0644 "${SOURCE_DIR}/docker-compose.yml" "${APP_DIR}/docker-compose.yml"
+install -m 0644 "${SOURCE_DIR}/mcp-proxy.conf" "${APP_DIR}/mcp-proxy.conf"
 install -m 0755 "${SOURCE_DIR}/scripts/start.sh" "${APP_DIR}/start.sh"
 
 # The official Playwright MCP image runs as the Node image's uid/gid 1000.

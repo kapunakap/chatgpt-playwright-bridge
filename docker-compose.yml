@@ -34,11 +34,32 @@ services:
     networks:
       - mcp
 
+  mcp-proxy:
+    image: nginx:1.29.8-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
+    expose:
+      - "8931"
+    volumes:
+      - ./mcp-proxy.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      playwright:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -qO- http://127.0.0.1:8931/compat-health >/dev/null
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+    restart: unless-stopped
+    networks:
+      - mcp
+
   tunnel:
     image: ${TUNNEL_CLIENT_IMAGE:-ghcr.io/openai/tunnel-client@sha256:c22610c17e4f624fa8114fb93d7d5df915ce7a4d3fe115a6c41ba4677ea54819}
     environment:
       CONTROL_PLANE_TUNNEL_ID: ${OPENAI_TUNNEL_ID:?OPENAI_TUNNEL_ID is required}
-      MCP_SERVER_URL: http://playwright:8931/mcp
+      MCP_SERVER_URL: http://mcp-proxy:8931/mcp
       LOG_LEVEL: ${LOG_LEVEL:-info}
       LOG_FORMAT: json
       HEALTH_LISTEN_ADDR: 127.0.0.1:8080
@@ -47,7 +68,7 @@ services:
     secrets:
       - openai_runtime_api_key
     depends_on:
-      playwright:
+      mcp-proxy:
         condition: service_healthy
     healthcheck:
       test:
