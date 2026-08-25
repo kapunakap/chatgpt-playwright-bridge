@@ -14,7 +14,7 @@ The MCP port is never published to the Internet. The EC2 security group has no i
 - EC2: `t4g.small` (ARM64/Graviton)
 - OS: Amazon Linux 2023, kernel 6.1 AMI family
 - Playwright MCP: `mcr.microsoft.com/playwright/mcp:v0.0.75`
-- OpenAI tunnel-client: `ghcr.io/openai/tunnel-client:v0.0.10`
+- OpenAI tunnel-client: official GHCR ARM64 digest `ghcr.io/openai/tunnel-client@sha256:0f009d151bf346c629b1745e9b8b8c3f4b2e8e71e382c81b8719d2ddf33a912c`
 - Docker Compose: `v5.4.0`
 - Root disk: 20 GiB encrypted gp3
 - Browser profile: persistent EBS-backed host directory
@@ -103,7 +103,7 @@ InstanceType=t4g.small
 Architecture=arm64
 VolumeSize=20
 PlaywrightMcpImage=mcr.microsoft.com/playwright/mcp:v0.0.75
-TunnelClientImage=ghcr.io/openai/tunnel-client:v0.0.10
+TunnelClientImage=ghcr.io/openai/tunnel-client@sha256:0f009d151bf346c629b1745e9b8b8c3f4b2e8e71e382c81b8719d2ddf33a912c
 ```
 
 The stack creates a dedicated VPC/public subnet, one EC2 instance, a no-ingress security group, an SSM-capable IAM role, and the smallest permissions needed to read the one runtime-key parameter.
