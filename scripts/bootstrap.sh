@@ -9,7 +9,7 @@ SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 : "${SSM_API_KEY_PARAMETER:?SSM_API_KEY_PARAMETER is required}"
 
 PLAYWRIGHT_MCP_IMAGE="${PLAYWRIGHT_MCP_IMAGE:-mcr.microsoft.com/playwright/mcp:v0.0.75}"
-TUNNEL_CLIENT_IMAGE="${TUNNEL_CLIENT_IMAGE:-ghcr.io/openai/tunnel-client@sha256:0f009d151bf346c629b1745e9b8b8c3f4b2e8e71e382c81b8719d2ddf33a912c}"
+TUNNEL_CLIENT_IMAGE="${TUNNEL_CLIENT_IMAGE:-ghcr.io/openai/tunnel-client@sha256:c22610c17e4f624fa8114fb93d7d5df915ce7a4d3fe115a6c41ba4677ea54819}"
 PLAYWRIGHT_DATA_DIR="${PLAYWRIGHT_DATA_DIR:-/var/lib/playwright-mcp-aws}"
 LOG_LEVEL="${LOG_LEVEL:-info}"
 

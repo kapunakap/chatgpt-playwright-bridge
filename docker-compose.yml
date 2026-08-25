@@ -35,7 +35,7 @@ services:
       - mcp
 
   tunnel:
-    image: ${TUNNEL_CLIENT_IMAGE:-ghcr.io/openai/tunnel-client@sha256:0f009d151bf346c629b1745e9b8b8c3f4b2e8e71e382c81b8719d2ddf33a912c}
+    image: ${TUNNEL_CLIENT_IMAGE:-ghcr.io/openai/tunnel-client@sha256:c22610c17e4f624fa8114fb93d7d5df915ce7a4d3fe115a6c41ba4677ea54819}
     environment:
       CONTROL_PLANE_TUNNEL_ID: ${OPENAI_TUNNEL_ID:?OPENAI_TUNNEL_ID is required}
       MCP_SERVER_URL: http://playwright:8931/mcp
