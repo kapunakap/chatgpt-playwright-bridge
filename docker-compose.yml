@@ -2,8 +2,10 @@ name: playwright-mcp-aws
 
 services:
   playwright:
-    image: ${PLAYWRIGHT_MCP_IMAGE:-mcr.microsoft.com/playwright/mcp:v0.0.75}
+    image: ${PLAYWRIGHT_MCP_IMAGE:-mcr.microsoft.com/playwright/mcp:v0.0.79}
     init: true
+    environment:
+      PLAYWRIGHT_MCP_PING_TIMEOUT_MS: "${PLAYWRIGHT_MCP_PING_TIMEOUT_MS:-0}"
     command:
       - --port
       - "8931"

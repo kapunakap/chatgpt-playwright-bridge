@@ -13,7 +13,8 @@ The MCP port is never published to the Internet. The EC2 security group has no i
 - AWS region: `us-east-1`
 - EC2: `t4g.small` (ARM64/Graviton)
 - OS: Amazon Linux 2023, kernel 6.1 AMI family
-- Playwright MCP: `mcr.microsoft.com/playwright/mcp:v0.0.75`
+- Playwright MCP: `mcr.microsoft.com/playwright/mcp:v0.0.79`
+- Playwright MCP heartbeat: disabled with `PLAYWRIGHT_MCP_PING_TIMEOUT_MS=0`
 - OpenAI tunnel-client: official stable v0.0.11 GHCR ARM64 digest `ghcr.io/openai/tunnel-client@sha256:c22610c17e4f624fa8114fb93d7d5df915ce7a4d3fe115a6c41ba4677ea54819`
 - Internal compatibility proxy: official Nginx `1.29.8-alpine` multi-architecture digest
   `nginx:1.29.8-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de`
@@ -104,7 +105,7 @@ Useful overrides:
 InstanceType=t4g.small
 Architecture=arm64
 VolumeSize=20
-PlaywrightMcpImage=mcr.microsoft.com/playwright/mcp:v0.0.75
+PlaywrightMcpImage=mcr.microsoft.com/playwright/mcp:v0.0.79
 TunnelClientImage=ghcr.io/openai/tunnel-client@sha256:c22610c17e4f624fa8114fb93d7d5df915ce7a4d3fe115a6c41ba4677ea54819
 ```
 
