@@ -137,6 +137,8 @@ sudo docker compose --env-file .env ps
 sudo docker compose --env-file .env logs --tail=100
 ```
 
+Compose waits for the Playwright MCP HTTP endpoint before starting the tunnel client, and reports tunnel readiness through its container health check. Both services should be running and healthy before running the smoke test.
+
 ## 4. Local EC2 smoke test
 
 From the SSM shell:

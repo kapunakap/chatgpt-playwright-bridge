@@ -21,6 +21,15 @@ services:
     shm_size: 512m
     volumes:
       - ${PLAYWRIGHT_DATA_DIR:-/var/lib/playwright-mcp-aws}:/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e "fetch('http://127.0.0.1:8931/mcp').then(r => process.exit(r.status < 500 ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
     restart: unless-stopped
     networks:
       - mcp
@@ -38,7 +47,16 @@ services:
     secrets:
       - openai_runtime_api_key
     depends_on:
-      - playwright
+      playwright:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -qO- http://127.0.0.1:8080/readyz >/dev/null
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
     restart: unless-stopped
     networks:
       - mcp
