@@ -34,6 +34,16 @@ The repository may remain private. The CloudFormation template embeds the small 
 
 Do **not** commit the OpenAI runtime API key. It belongs in SSM Parameter Store as a `SecureString`.
 
+Before running any AWS CLI command, select the intended account and region, then verify the identity:
+
+```bash
+export AWS_PROFILE=your-profile
+export AWS_REGION=us-east-1
+aws sts get-caller-identity
+```
+
+On Amazon Linux 2023, the bootstrap keeps the existing `curl-minimal` package. It installs `curl-minimal` only if no `curl` command is present; replacing it with the full `curl` package can cause a package conflict.
+
 ## 0. Create the OpenAI Secure MCP Tunnel
 
 In the OpenAI Platform tunnel settings, create a tunnel such as `playwright-mcp-aws`.

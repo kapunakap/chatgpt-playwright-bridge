@@ -14,9 +14,15 @@ PLAYWRIGHT_DATA_DIR="${PLAYWRIGHT_DATA_DIR:-/var/lib/playwright-mcp-aws}"
 LOG_LEVEL="${LOG_LEVEL:-info}"
 
 if command -v dnf >/dev/null 2>&1; then
-  dnf install -y docker curl jq
+  dnf install -y docker jq
+  if ! command -v curl >/dev/null 2>&1; then
+    dnf install -y curl-minimal
+  fi
 elif command -v yum >/dev/null 2>&1; then
-  yum install -y docker curl jq
+  yum install -y docker jq
+  if ! command -v curl >/dev/null 2>&1; then
+    yum install -y curl-minimal
+  fi
 else
   echo "This MVP bootstrap supports Amazon Linux (dnf/yum)." >&2
   exit 1
