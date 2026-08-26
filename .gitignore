@@ -5,3 +5,4 @@
 *.log
 .DS_Store
 smoke.png
+__pycache__/

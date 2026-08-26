@@ -5,6 +5,11 @@ APP_DIR="${APP_DIR:-/opt/playwright-mcp-aws}"
 ENV_FILE="${ENV_FILE:-${APP_DIR}/.env}"
 RUNTIME_DIR="${RUNTIME_DIR:-/run/playwright-mcp-aws}"
 
+# Serialize startup against the explicit, stopped-service profile recovery tool.
+install -d -m 0700 "${RUNTIME_DIR}"
+exec 9>"${RUNTIME_DIR}/profile-maintenance.lock"
+flock -w 60 9
+
 if [[ ! -r "${ENV_FILE}" ]]; then
   echo "missing ${ENV_FILE}" >&2
   exit 1

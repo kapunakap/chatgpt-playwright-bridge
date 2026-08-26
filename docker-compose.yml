@@ -3,6 +3,10 @@ name: playwright-mcp-aws
 services:
   playwright:
     image: ${PLAYWRIGHT_MCP_IMAGE:-mcr.microsoft.com/playwright/mcp:v0.0.79}
+    hostname: playwright-mcp-aws-browser
+    mem_limit: 2560m
+    memswap_limit: 2560m
+    stop_grace_period: 60s
     init: true
     environment:
       PLAYWRIGHT_MCP_PING_TIMEOUT_MS: "${PLAYWRIGHT_MCP_PING_TIMEOUT_MS:-0}"
@@ -38,6 +42,8 @@ services:
 
   mcp-proxy:
     image: nginx:1.29.8-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
+    mem_limit: 64m
+    memswap_limit: 64m
     expose:
       - "8931"
     volumes:
@@ -59,6 +65,8 @@ services:
 
   tunnel:
     image: ${TUNNEL_CLIENT_IMAGE:-ghcr.io/openai/tunnel-client@sha256:c22610c17e4f624fa8114fb93d7d5df915ce7a4d3fe115a6c41ba4677ea54819}
+    mem_limit: 256m
+    memswap_limit: 256m
     environment:
       CONTROL_PLANE_TUNNEL_ID: ${OPENAI_TUNNEL_ID:?OPENAI_TUNNEL_ID is required}
       MCP_SERVER_URL: http://mcp-proxy:8931/mcp

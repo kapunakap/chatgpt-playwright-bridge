@@ -15,12 +15,12 @@ PLAYWRIGHT_DATA_DIR="${PLAYWRIGHT_DATA_DIR:-/var/lib/playwright-mcp-aws}"
 LOG_LEVEL="${LOG_LEVEL:-info}"
 
 if command -v dnf >/dev/null 2>&1; then
-  dnf install -y docker jq
+  dnf install -y docker jq python3 util-linux
   if ! command -v curl >/dev/null 2>&1; then
     dnf install -y curl-minimal
   fi
 elif command -v yum >/dev/null 2>&1; then
-  yum install -y docker jq
+  yum install -y docker jq python3 util-linux
   if ! command -v curl >/dev/null 2>&1; then
     yum install -y curl-minimal
   fi
@@ -47,6 +47,9 @@ install -d -m 0755 "${APP_DIR}"
 install -m 0644 "${SOURCE_DIR}/docker-compose.yml" "${APP_DIR}/docker-compose.yml"
 install -m 0644 "${SOURCE_DIR}/mcp-proxy.conf" "${APP_DIR}/mcp-proxy.conf"
 install -m 0755 "${SOURCE_DIR}/scripts/start.sh" "${APP_DIR}/start.sh"
+for script in smoke-test.sh mcp-smoke.cjs recover-profile.py resource-sample.py install-observability.sh; do
+  install -m 0755 "${SOURCE_DIR}/scripts/${script}" "${APP_DIR}/${script}"
+done
 
 # The official Playwright MCP image runs as the Node image's uid/gid 1000.
 # Make the persistent EBS-backed bind mount writable without running MCP as root.
@@ -87,3 +90,4 @@ UNIT
 systemctl daemon-reload
 systemctl enable playwright-mcp-aws.service
 systemctl restart playwright-mcp-aws.service
+"${APP_DIR}/install-observability.sh"

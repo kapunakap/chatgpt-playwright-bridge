@@ -16,6 +16,16 @@ jobs:
       - name: Shell syntax
         run: bash -n scripts/*.sh
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Runtime regression tests and embedded file parity
+        run: |
+          python3 -m unittest discover -s tests -p 'test_*.py'
+          node --test tests/*.cjs
+          python3 scripts/sync-template.py --check
+
       - name: Compose config
         run: |
           cp .env.example .env

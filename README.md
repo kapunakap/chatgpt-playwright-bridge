@@ -11,7 +11,7 @@ The MCP port is never published to the Internet. The EC2 security group has no i
 ## MVP defaults
 
 - AWS region: `us-east-1`
-- EC2: `t4g.small` (ARM64/Graviton)
+- EC2: `t4g.medium` (ARM64/Graviton, 4 GiB RAM)
 - OS: Amazon Linux 2023, kernel 6.1 AMI family
 - Playwright MCP: `mcr.microsoft.com/playwright/mcp:v0.0.79`
 - Playwright MCP heartbeat: disabled with `PLAYWRIGHT_MCP_PING_TIMEOUT_MS=0`
@@ -23,7 +23,7 @@ The MCP port is never published to the Internet. The EC2 security group has no i
 - Browser profile: persistent EBS-backed host directory
 - Public inbound ports: none
 
-Both upstream containers publish Linux ARM64 builds. If ARM64 causes a real runtime problem, deploy with `Architecture=x86_64` and an x86 instance type such as `t3a.small`.
+Both upstream containers publish Linux ARM64 builds. If ARM64 causes a real runtime problem, deploy with `Architecture=x86_64` and an x86 instance type with at least 4 GiB RAM, such as `t3a.medium`.
 
 The template intentionally pins AL2023 to the kernel 6.1 AMI family instead of `kernel-default`. AWS changed the default AL2023 kernel from 6.1 to 6.18 on August 17, 2026; pinning 6.1 removes that fresh variable from the MVP. The AMI itself still resolves through AWS's version-specific public SSM alias, so patched 6.1 images continue to be selected.
 
@@ -102,7 +102,7 @@ aws cloudformation deploy \
 Useful overrides:
 
 ```text
-InstanceType=t4g.small
+InstanceType=t4g.medium
 Architecture=arm64
 VolumeSize=20
 PlaywrightMcpImage=mcr.microsoft.com/playwright/mcp:v0.0.79
@@ -172,6 +172,45 @@ After associating the tunnel with your ChatGPT app/workspace, ask ChatGPT to use
 8. Reboot EC2 and verify Docker + the tunnel reconnect automatically, then navigate again from ChatGPT.
 
 That is the MVP definition of done.
+
+## Resource and profile safeguards
+
+Playwright is capped at 2560 MiB, the tunnel at 256 MiB, and Nginx at 64 MiB.
+Memory-plus-swap limits equal the RAM limits; these containers cannot use swap.
+The remaining host RAM is reserved for Linux, Docker, and SSM. A memory cap can
+still terminate a heavy browser workload; it prevents that workload from taking
+all host memory. No automatic host reboot or profile deletion is configured.
+
+The browser has a stable hostname, `playwright-mcp-aws-browser`. Its profile is
+still persistent and shared between MCP clients. Do not add `--isolated` as a
+lock workaround: that changes the persistence behavior.
+
+For a stale lock left by an older container hostname, first stop the systemd
+service and inspect the lock target. Run `recover-profile.py --expected-lock
+OLD_HOST-PID` for a dry run, then repeat with `--apply` only after verifying the
+owner is gone. The helper refuses active services, running containers mounting
+the profile, live browser processes, non-local filesystems, changed locks, and
+non-symlink entries. It removes only `SingletonLock`, `SingletonSocket`, and
+`SingletonCookie`, never their targets or other profile files.
+
+`playwright-resource-sample.timer` records numeric host and container resource
+measurements every minute in `/var/log/playwright-mcp-aws/resources.jsonl`.
+Logs are root-only and rotate at 1 MiB with four backups. They include available
+RAM, pressure, cgroup memory/OOM counters, and Chrome/Node RSS sums (shared pages
+may be counted more than once). URLs, command lines, credentials, and profile
+contents are never collected.
+
+`smoke-test.sh` now verifies real navigation, tab listing, and PNG image content
+and fails on MCP tool-level errors. `smoke-test.sh 31 60` runs at least 30 minutes
+of checks against Example Domain. This uses the shared browser; run it only in
+a maintenance window. Container health remains a transport check, not proof
+that browser actions work.
+
+After editing runtime files, run `python3 scripts/sync-template.py`. CI checks
+that the compressed CloudFormation boot payload matches the source files.
+For an existing instance, install the reviewed files through SSM; user-data
+updates do not replace that deployment step. Preserve the deployed AMI and
+reject any change set that replaces the existing instance or volume.
 
 ## Security notes
 
