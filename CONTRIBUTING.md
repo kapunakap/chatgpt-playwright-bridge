@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for improving `playwright-mcp-aws`.
+Thanks for improving `chatgpt-playwright-bridge`.
 
 ## Before opening a pull request
 
