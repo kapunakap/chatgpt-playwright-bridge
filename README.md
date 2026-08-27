@@ -1,4 +1,4 @@
-# playwright-mcp-aws
+# ChatGPT Playwright Bridge
 <img width="2172" height="724" alt="ChatGPT Image Aug 27, 2026, 01_46_59 AM" src="https://github.com/user-attachments/assets/880739e2-b965-45ce-bbba-fd6b0473b5bc" />
 
 Self-host the official Microsoft Playwright MCP on a small AWS EC2 instance and connect it to ChatGPT through OpenAI Secure MCP Tunnel.
