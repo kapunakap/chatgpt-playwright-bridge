@@ -1,7 +1,11 @@
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
+import tarfile
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
@@ -18,6 +22,9 @@ def load(name):
 
 recovery = load("recover-profile")
 metrics = load("resource-sample")
+sync_spec = importlib.util.spec_from_file_location("sync_template", ROOT / "scripts" / "sync-template.py")
+sync_template = importlib.util.module_from_spec(sync_spec)
+sync_spec.loader.exec_module(sync_template)
 
 
 class ProfileRecoveryTest(unittest.TestCase):
@@ -94,6 +101,29 @@ class MetricsTest(unittest.TestCase):
                     self.assertIn("index", json.loads(line))
                 self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             self.assertEqual(json.loads((Path(directory) / "resources.jsonl").read_text().splitlines()[-1])["index"], 29)
+
+
+class TemplateSyncTest(unittest.TestCase):
+    def test_runtime_bundle_is_deterministic_and_contains_exact_files(self):
+        first = sync_template.runtime_bundle()
+        self.assertEqual(first, sync_template.runtime_bundle())
+        with tarfile.open(fileobj=io.BytesIO(first), mode="r:gz") as archive:
+            self.assertEqual(archive.getnames(), list(sync_template.FILES))
+            for name in sync_template.FILES:
+                extracted = archive.extractfile(name).read()
+                self.assertEqual(extracted, (ROOT / name).read_bytes(), name)
+
+    def test_template_stays_within_guard_and_check_is_in_sync(self):
+        rendered = sync_template.synced_template()
+        payload = rendered.split("Fn::Base64: !Sub |\n", 1)[1].split("\nOutputs:", 1)[0]
+        user_data = "\n".join(line[10:] for line in payload.splitlines()).encode()
+        self.assertLessEqual(len(user_data), 15000)
+        self.assertEqual(rendered, (ROOT / "infra/cloudformation.yaml").read_text())
+        check = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "sync-template.py"), "--check"],
+            cwd=ROOT, capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(check.returncode, 0, check.stderr)
 
 
 if __name__ == "__main__":

@@ -10,6 +10,8 @@ SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
 PLAYWRIGHT_MCP_IMAGE="${PLAYWRIGHT_MCP_IMAGE:-mcr.microsoft.com/playwright/mcp:v0.0.79}"
 PLAYWRIGHT_MCP_PING_TIMEOUT_MS="${PLAYWRIGHT_MCP_PING_TIMEOUT_MS:-0}"
+TAB_REAPER_IDLE_MS="${TAB_REAPER_IDLE_MS:-1800000}"
+TAB_REAPER_INTERVAL_MS="${TAB_REAPER_INTERVAL_MS:-60000}"
 TUNNEL_CLIENT_IMAGE="${TUNNEL_CLIENT_IMAGE:-ghcr.io/openai/tunnel-client@sha256:c22610c17e4f624fa8114fb93d7d5df915ce7a4d3fe115a6c41ba4677ea54819}"
 PLAYWRIGHT_DATA_DIR="${PLAYWRIGHT_DATA_DIR:-/var/lib/playwright-mcp-aws}"
 LOG_LEVEL="${LOG_LEVEL:-info}"
@@ -47,7 +49,7 @@ install -d -m 0755 "${APP_DIR}"
 install -m 0644 "${SOURCE_DIR}/docker-compose.yml" "${APP_DIR}/docker-compose.yml"
 install -m 0644 "${SOURCE_DIR}/mcp-proxy.conf" "${APP_DIR}/mcp-proxy.conf"
 install -m 0755 "${SOURCE_DIR}/scripts/start.sh" "${APP_DIR}/start.sh"
-for script in smoke-test.sh mcp-smoke.cjs recover-profile.py resource-sample.py install-observability.sh; do
+for script in smoke-test.sh mcp-smoke.cjs recover-profile.py resource-sample.py install-observability.sh tab-reaper.cjs; do
   install -m 0755 "${SOURCE_DIR}/scripts/${script}" "${APP_DIR}/${script}"
 done
 
@@ -58,6 +60,8 @@ install -d -o 1000 -g 1000 -m 0700 "${PLAYWRIGHT_DATA_DIR}"
 cat > "${APP_DIR}/.env" <<ENV
 PLAYWRIGHT_MCP_IMAGE=${PLAYWRIGHT_MCP_IMAGE}
 PLAYWRIGHT_MCP_PING_TIMEOUT_MS=${PLAYWRIGHT_MCP_PING_TIMEOUT_MS}
+TAB_REAPER_IDLE_MS=${TAB_REAPER_IDLE_MS}
+TAB_REAPER_INTERVAL_MS=${TAB_REAPER_INTERVAL_MS}
 TUNNEL_CLIENT_IMAGE=${TUNNEL_CLIENT_IMAGE}
 OPENAI_TUNNEL_ID=${OPENAI_TUNNEL_ID}
 SSM_API_KEY_PARAMETER=${SSM_API_KEY_PARAMETER}

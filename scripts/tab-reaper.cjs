@@ -4,6 +4,7 @@
 const DEFAULT_IDLE_MS = 30 * 60 * 1000;
 const DEFAULT_INTERVAL_MS = 60 * 1000;
 const DEFAULT_ENDPOINT = 'http://mcp-proxy:8931/mcp';
+const SUMMARY_FIELDS = ['before', 'stale', 'closedCount', 'after', 'protectedCount', 'failureCount', 'remainingStale'];
 
 function positiveInteger(value, fallback, name) {
   if (value === undefined || value === '') return fallback;
@@ -15,15 +16,21 @@ function positiveInteger(value, fallback, name) {
 function decodeBody(text, id) {
   const trimmed = text.trim();
   if (!trimmed) return null;
-  if (trimmed.startsWith('{')) return JSON.parse(trimmed);
-  const messages = trimmed.split(/\r?\n/).filter(line => line.startsWith('data:'))
-    .map(line => JSON.parse(line.slice(5).trim()));
-  return messages.find(message => message.id === id) || null;
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) return JSON.parse(trimmed);
+
+  const messages = [];
+  for (const line of trimmed.split(/\r?\n/)) {
+    if (!line.startsWith('data:')) continue;
+    const data = line.slice(5).trim();
+    if (data) messages.push(JSON.parse(data));
+  }
+  return messages.find(message => message && message.id === id) || null;
 }
 
 function createClient(endpoint, fetchImpl = fetch) {
   let sessionId = '';
   let nextId = 1;
+
   async function post(payload) {
     const headers = { 'content-type': 'application/json', accept: 'application/json, text/event-stream' };
     if (sessionId) headers['mcp-session-id'] = sessionId;
@@ -35,6 +42,7 @@ function createClient(endpoint, fetchImpl = fetch) {
     if (!response.ok) throw new Error(`${payload.method}: HTTP ${response.status}`);
     return decodeBody(text, payload.id);
   }
+
   return {
     async request(method, params = {}) {
       const id = nextId++;
@@ -45,12 +53,19 @@ function createClient(endpoint, fetchImpl = fetch) {
       if (!response.result) throw new Error(`${method}: missing result`);
       return response.result;
     },
-    notify(method) { return post({ jsonrpc: '2.0', method }); },
+    async notify(method, params = {}) {
+      const response = await post({ jsonrpc: '2.0', method, params });
+      if (response?.error) throw new Error(`${method}: JSON-RPC error ${response.error.code}`);
+      if (response?.result?.isError) throw new Error(`${method}: MCP tool returned isError`);
+      return response;
+    },
     async close() {
       if (!sessionId) return;
-      await fetchImpl(endpoint, {
+      const response = await fetchImpl(endpoint, {
         method: 'DELETE', headers: { 'mcp-session-id': sessionId }, signal: AbortSignal.timeout(10000),
       });
+      if (!response.ok) throw new Error(`MCP session close: HTTP ${response.status}`);
+      sessionId = '';
     },
   };
 }
@@ -59,83 +74,154 @@ function reaperCode(idleMs) {
   return `async (page) => {
     const context = page.context();
     const now = Date.now();
-    const initKey = Symbol.for('chatgpt.playwright.tab-reaper.init-v1');
-    const activityKeyName = 'chatgpt.playwright.tab-reaper.activity-v1';
+    const lockKey = Symbol.for('chatgpt.playwright.tab-reaper.lock-v1');
+    const initKey = Symbol.for('chatgpt.playwright.tab-reaper.init-v2');
+    const activityKeyName = 'chatgpt.playwright.tab-reaper.activity-v2';
     const installActivity = () => {
-      const key = Symbol.for('chatgpt.playwright.tab-reaper.activity-v1');
+      const key = Symbol.for('chatgpt.playwright.tab-reaper.activity-v2');
       if (globalThis[key]) return;
       const state = { lastActivity: Date.now() };
       Object.defineProperty(globalThis, key, { value: state, configurable: false });
       const touch = () => { state.lastActivity = Date.now(); };
       const passive = { capture: true, passive: true };
-      for (const type of ['pointerdown', 'keydown', 'touchstart', 'wheel', 'input', 'change', 'submit'])
-        addEventListener(type, touch, passive);
+      for (const type of [
+        'pointerdown', 'pointerup', 'pointermove', 'touchstart', 'touchmove', 'keydown',
+        'beforeinput', 'input', 'change', 'submit', 'wheel', 'pageshow', 'popstate', 'hashchange',
+      ]) addEventListener(type, touch, passive);
       document.addEventListener('visibilitychange', () => { if (!document.hidden) touch(); }, true);
     };
 
-    if (!context[initKey]) {
-      await context.addInitScript(installActivity);
-      context[initKey] = true;
+    const previous = context[lockKey] || Promise.resolve();
+    let release;
+    const current = new Promise(resolve => { release = resolve; });
+    const queued = Promise.resolve(previous).catch(() => {}).then(() => current);
+    try {
+      Object.defineProperty(context, lockKey, { value: queued, configurable: true });
+    } catch {
+      // Some host objects are not extensible; the last-tab check still applies.
     }
+    await previous.catch(() => {});
 
-    const records = [];
-    for (const candidate of context.pages()) {
-      if (candidate.isClosed()) continue;
-      let lastActivity = now;
-      let protectedReason = null;
-      try {
-        await candidate.evaluate(installActivity);
-        lastActivity = await candidate.evaluate(name => {
-          const state = globalThis[Symbol.for(name)];
-          return state && Number.isFinite(state.lastActivity) ? state.lastActivity : Date.now();
-        }, activityKeyName);
-      } catch {
-        // Browser-internal and otherwise non-evaluable pages are kept rather than guessed stale.
-        protectedReason = 'uninspectable';
+    try {
+      let install = context[initKey];
+      if (!install) {
+        const pending = context.addInitScript(installActivity);
+        try {
+          Object.defineProperty(context, initKey, { value: pending, configurable: true });
+        } catch {
+          // The page-level symbol makes repeated registration harmless if needed.
+        }
+        install = pending;
       }
-      let title = '';
-      try { title = await candidate.title(); } catch {}
-      records.push({ page: candidate, url: candidate.url(), title, lastActivity, protectedReason });
-    }
-
-    const stale = records
-      .filter(record => !record.protectedReason && now - record.lastActivity >= ${idleMs})
-      .sort((a, b) => a.lastActivity - b.lastActivity);
-    const closed = [];
-    const failures = [];
-    for (const record of stale) {
-      if (context.pages().length <= 1) break;
       try {
-        await record.page.close({ runBeforeUnload: false });
-        closed.push({ url: record.url, title: record.title, idleMs: now - record.lastActivity });
+        await install;
       } catch (error) {
-        failures.push({ url: record.url, error: String(error && error.message || error) });
+        try {
+          if (context[initKey] === install) delete context[initKey];
+        } catch {}
+        throw error;
       }
-    }
 
-    return {
-      time: new Date(now).toISOString(),
-      idleMs: ${idleMs},
-      before: records.length,
-      stale: stale.length,
-      closedCount: closed.length,
-      after: context.pages().length,
-      closed,
-      protectedCount: records.filter(record => record.protectedReason).length,
-      failures,
-    };
+      const records = [];
+      for (const candidate of context.pages()) {
+        if (candidate.isClosed()) continue;
+        let lastActivity = 0;
+        let protectedPage = false;
+        try {
+          await candidate.evaluate(installActivity);
+          lastActivity = await candidate.evaluate(name => {
+            const state = globalThis[Symbol.for(name)];
+            return state && Number.isFinite(state.lastActivity) ? state.lastActivity : 0;
+          }, activityKeyName);
+          if (!Number.isFinite(lastActivity) || lastActivity < 1) protectedPage = true;
+        } catch {
+          // Browser-internal and otherwise non-evaluable pages stay open.
+          protectedPage = true;
+        }
+        records.push({ page: candidate, lastActivity, protectedPage });
+      }
+
+      const stale = records
+        .filter(record => !record.protectedPage && now - record.lastActivity >= ${idleMs})
+        .sort((a, b) => a.lastActivity - b.lastActivity);
+      let closedCount = 0;
+      let failureCount = 0;
+      for (const record of stale) {
+        if (context.pages().length <= 1) break;
+        if (record.page.isClosed()) continue;
+        try {
+          await record.page.close({ runBeforeUnload: false });
+          closedCount++;
+        } catch {
+          failureCount++;
+        }
+      }
+
+      return {
+        time: new Date(now).toISOString(),
+        idleMs: ${idleMs},
+        before: records.length,
+        stale: stale.length,
+        closedCount,
+        after: context.pages().length,
+        protectedCount: records.filter(record => record.protectedPage).length,
+        failureCount,
+        remainingStale: stale.length - closedCount,
+      };
+    } finally {
+      release();
+      try {
+        if (context[lockKey] === queued) delete context[lockKey];
+      } catch {}
+    }
   }`;
 }
 
+function extractJsonObject(text) {
+  const marker = text.indexOf('### Result');
+  const startAt = marker >= 0 ? text.indexOf('{', marker) : text.trimStart().startsWith('{') ? text.indexOf('{') : -1;
+  if (startAt < 0) throw new Error('Missing browser_run_code_unsafe result');
+
+  let depth = 0;
+  let quoted = false;
+  let escaped = false;
+  for (let index = startAt; index < text.length; index++) {
+    const character = text[index];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (character === '\\') escaped = true;
+      else if (character === '"') quoted = false;
+      continue;
+    }
+    if (character === '"') quoted = true;
+    else if (character === '{') depth++;
+    else if (character === '}' && --depth === 0) return text.slice(startAt, index + 1);
+  }
+  throw new Error('Unparseable browser_run_code_unsafe result');
+}
+
 function parseToolSummary(result) {
+  if (!result || result.isError) throw new Error('browser_run_code_unsafe returned isError');
   const text = (result.content || []).filter(item => item.type === 'text').map(item => item.text).join('\n');
-  const match = text.match(/### Result\s*\n(\{[^\n]*\})/);
-  if (!match) return null;
-  try { return JSON.parse(match[1]); } catch { return null; }
+  let summary;
+  try {
+    summary = JSON.parse(extractJsonObject(text));
+  } catch (error) {
+    if (error.message.startsWith('Missing') || error.message.startsWith('Unparseable')) throw error;
+    throw new Error('Unparseable browser_run_code_unsafe result');
+  }
+  if (!summary || typeof summary !== 'object' || Array.isArray(summary))
+    throw new Error('Unparseable browser_run_code_unsafe result');
+  for (const field of SUMMARY_FIELDS) {
+    if (!Number.isSafeInteger(summary[field]) || summary[field] < 0)
+      throw new Error(`Invalid browser_run_code_unsafe summary: ${field}`);
+  }
+  return Object.fromEntries(SUMMARY_FIELDS.map(field => [field, summary[field]]));
 }
 
 async function sweep(endpoint, idleMs, fetchImpl = fetch) {
   const client = createClient(endpoint, fetchImpl);
+  let primaryError;
   try {
     await client.request('initialize', {
       protocolVersion: '2025-06-18', capabilities: {},
@@ -149,13 +235,31 @@ async function sweep(endpoint, idleMs, fetchImpl = fetch) {
       name: 'browser_run_code_unsafe', arguments: { code: reaperCode(idleMs) },
     });
     return parseToolSummary(result);
+  } catch (error) {
+    primaryError = error;
+    throw error;
   } finally {
-    await client.close().catch(() => {});
+    try {
+      await client.close();
+    } catch (error) {
+      if (!primaryError) throw error;
+    }
   }
 }
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function diagnostic(error) {
+  const message = String(error && error.message || error);
+  const http = message.match(/HTTP (\d{3})/);
+  if (http) return `mcp_http_${http[1]}`;
+  if (message.includes('JSON-RPC error')) return 'mcp_jsonrpc_error';
+  if (message.includes('isError')) return 'mcp_tool_error';
+  if (message.includes('result')) return 'mcp_invalid_result';
+  if (message.includes('Missing tool')) return 'mcp_missing_tool';
+  return 'mcp_sweep_error';
 }
 
 async function main() {
@@ -171,13 +275,12 @@ async function main() {
     try {
       const summary = await sweep(endpoint, idleMs);
       console.log(JSON.stringify({
-        time: new Date().toISOString(), status: 'passed', idleMs, intervalMs,
-        ...(summary || {}),
+        time: new Date().toISOString(), status: 'passed', idleMs, intervalMs, ...summary,
       }));
     } catch (error) {
       console.error(JSON.stringify({
         time: new Date().toISOString(), status: 'error', idleMs, intervalMs,
-        error: String(error && error.message || error),
+        diagnostic: diagnostic(error),
       }));
     }
     const remaining = intervalMs - (Date.now() - started);
@@ -187,8 +290,8 @@ async function main() {
 
 module.exports = {
   DEFAULT_ENDPOINT, DEFAULT_IDLE_MS, DEFAULT_INTERVAL_MS, positiveInteger,
-  decodeBody, createClient, reaperCode, parseToolSummary, sweep,
+  decodeBody, createClient, reaperCode, parseToolSummary, sweep, diagnostic,
 };
 
 if (require.main === module)
-  main().catch(error => { console.error(error.message); process.exitCode = 1; });
+  main().catch(error => { console.error(diagnostic(error)); process.exitCode = 1; });
