@@ -63,6 +63,27 @@ services:
     networks:
       - mcp
 
+  tab-reaper:
+    image: ${PLAYWRIGHT_MCP_IMAGE:-mcr.microsoft.com/playwright/mcp:v0.0.79}
+    mem_limit: 96m
+    memswap_limit: 96m
+    init: true
+    entrypoint:
+      - node
+      - /opt/tab-reaper.cjs
+    environment:
+      TAB_REAPER_MCP_URL: http://mcp-proxy:8931/mcp
+      TAB_REAPER_IDLE_MS: "${TAB_REAPER_IDLE_MS:-1800000}"
+      TAB_REAPER_INTERVAL_MS: "${TAB_REAPER_INTERVAL_MS:-60000}"
+    volumes:
+      - ./tab-reaper.cjs:/opt/tab-reaper.cjs:ro
+    depends_on:
+      mcp-proxy:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - mcp
+
   tunnel:
     image: ${TUNNEL_CLIENT_IMAGE:-ghcr.io/openai/tunnel-client@sha256:c22610c17e4f624fa8114fb93d7d5df915ce7a4d3fe115a6c41ba4677ea54819}
     mem_limit: 256m
