@@ -16,6 +16,7 @@ The MCP port is never published to the Internet. The EC2 security group has no i
 - OS: Amazon Linux 2023, kernel 6.1 AMI family
 - Playwright MCP: `mcr.microsoft.com/playwright/mcp:v0.0.79`
 - Playwright MCP heartbeat: disabled with `PLAYWRIGHT_MCP_PING_TIMEOUT_MS=0`
+- Stale-tab reaper: enabled with `TAB_REAPER_IDLE_MS=1800000` (30 minutes) and `TAB_REAPER_INTERVAL_MS=60000` (60 seconds)
 - OpenAI tunnel-client: official stable v0.0.11 GHCR ARM64 digest `ghcr.io/openai/tunnel-client@sha256:c22610c17e4f624fa8114fb93d7d5df915ce7a4d3fe115a6c41ba4677ea54819`
 - Internal compatibility proxy: official Nginx `1.29.8-alpine` multi-architecture digest
   `nginx:1.29.8-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de`
@@ -206,6 +207,14 @@ and fails on MCP tool-level errors. `smoke-test.sh 31 60` runs at least 30 minut
 of checks against Example Domain. This uses the shared browser; run it only in
 a maintenance window. Container health remains a transport check, not proof
 that browser actions work.
+
+The `tab-reaper` sidecar uses the same pinned Playwright MCP image with a
+different entrypoint and connects only to the internal `mcp-proxy`; it does not
+create a second browser or profile. Every 60 seconds it checks activity across
+the shared context and closes tabs idle for 30 minutes. Navigation, visibility
+changes/becoming visible, pointer/touch input, typing and form input, and wheel
+input count as activity. It never selects tabs, keeps pages it cannot inspect, never closes
+the last tab, and emits counts/diagnostics without URLs, titles, or page data.
 
 After editing runtime files, run `python3 scripts/sync-template.py`. CI checks
 that the compressed CloudFormation boot payload matches the source files.
