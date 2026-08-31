@@ -1,3 +1,5 @@
+import base64
+import gzip
 import importlib.util
 import io
 import json
@@ -104,6 +106,11 @@ class MetricsTest(unittest.TestCase):
 
 
 class TemplateSyncTest(unittest.TestCase):
+    def replace_bundle(self, text, bundle):
+        match, _ = sync_template.embedded_archive(text)
+        encoded = base64.b64encode(bundle).decode()
+        return text[:match.start()] + sync_template.runtime_block(encoded) + text[match.end():]
+
     def test_runtime_bundle_is_deterministic_and_contains_exact_files(self):
         first = sync_template.runtime_bundle()
         self.assertEqual(first, sync_template.runtime_bundle())
@@ -114,16 +121,50 @@ class TemplateSyncTest(unittest.TestCase):
                 self.assertEqual(extracted, (ROOT / name).read_bytes(), name)
 
     def test_template_stays_within_guard_and_check_is_in_sync(self):
-        rendered = sync_template.synced_template()
-        payload = rendered.split("Fn::Base64: !Sub |\n", 1)[1].split("\nOutputs:", 1)[0]
-        user_data = "\n".join(line[10:] for line in payload.splitlines()).encode()
-        self.assertLessEqual(len(user_data), 15000)
-        self.assertEqual(rendered, (ROOT / "infra/cloudformation.yaml").read_text())
+        template = (ROOT / "infra/cloudformation.yaml").read_text()
+        self.assertLessEqual(sync_template.validate_template(template), 15000)
+        self.assertEqual(sync_template.synced_template(), template)
         check = subprocess.run(
             [sys.executable, str(ROOT / "scripts" / "sync-template.py"), "--check"],
             cwd=ROOT, capture_output=True, text=True, check=False,
         )
         self.assertEqual(check.returncode, 0, check.stderr)
+
+    def test_semantically_identical_different_gzip_stream_is_reused(self):
+        template = (ROOT / "infra/cloudformation.yaml").read_text()
+        _, original = sync_template.embedded_archive(template)
+        alternate = bytearray(original)
+        alternate[4] = (alternate[4] + 1) % 256  # Different gzip mtime, identical tar payload.
+        alternate = bytes(alternate)
+        self.assertNotEqual(alternate, original)
+        alternate_template = self.replace_bundle(template, alternate)
+        self.assertEqual(sync_template.synced_template(alternate_template), alternate_template)
+        self.assertLessEqual(sync_template.check_template(alternate_template), 15000)
+
+    def test_one_byte_embedded_file_drift_fails_check_and_forces_regeneration(self):
+        template = (ROOT / "infra/cloudformation.yaml").read_text()
+        _, original = sync_template.embedded_archive(template)
+        archive_bytes = bytearray(gzip.decompress(original))
+        source_bytes = (ROOT / sync_template.FILES[-1]).read_bytes()
+        offset = archive_bytes.find(source_bytes)
+        self.assertGreaterEqual(offset, 0)
+        archive_bytes[offset] ^= 1
+        drifted_template = self.replace_bundle(template, gzip.compress(archive_bytes, mtime=0))
+        with self.assertRaisesRegex(RuntimeError, "differs from FILES"):
+            sync_template.validate_template(drifted_template)
+        regenerated = sync_template.synced_template(drifted_template)
+        self.assertNotEqual(regenerated, drifted_template)
+        self.assertLessEqual(sync_template.validate_template(regenerated), 15000)
+
+    def test_extraction_shell_shape_drift_fails(self):
+        template = (ROOT / "infra/cloudformation.yaml").read_text()
+        drifted_template = template.replace(
+            'tar -xzf "$work/runtime.tgz"', 'tar -x "$work/runtime.tgz"', 1,
+        )
+        with self.assertRaisesRegex(RuntimeError, "embedded runtime block"):
+            sync_template.validate_template(drifted_template)
+        with self.assertRaisesRegex(RuntimeError, "embedded runtime block"):
+            sync_template.synced_template(drifted_template)
 
 
 if __name__ == "__main__":
