@@ -10,6 +10,7 @@ const ACCESS = process.env.LIVE_VIEW_ACCESS || '/run/live-view/access.json';
 const MCP = process.env.LIVE_VIEW_MCP_URL || 'http://127.0.0.1:8931/mcp';
 const clients = new Set();
 let controller = null, cdp = null, target = '', tabs = [], busy = false;
+let viewerSize;
 function access(token) {
   try {
     const a = JSON.parse(fs.readFileSync(ACCESS, 'utf8'));
@@ -77,7 +78,8 @@ async function attach(id) {
   const found=list.find(t=>t.id===id); if(!found) throw new Error('Tab unavailable');
   const next=new CDP(found.webSocketDebuggerUrl);await next.ready; cdp=next;target=id;
   await next.call('Page.enable');
-  await next.call('Page.startScreencast',{format:'jpeg',quality:70,maxWidth:1600,maxHeight:1000,everyNthFrame:1});
+  if(viewerSize)await next.call('Emulation.setDeviceMetricsOverride',{...viewerSize,deviceScaleFactor:1,mobile:false});
+  await next.call('Page.startScreencast',{format:'jpeg',quality:70,maxWidth:1920,maxHeight:2160,everyNthFrame:1});
 }
 function number(n, min, max){if(!Number.isFinite(n)||n<min||n>max)throw new Error('Invalid input');return n;}
 function websiteURL(value) {
@@ -89,7 +91,10 @@ function websiteURL(value) {
 }
 async function input(message) {
   if(!cdp) throw new Error('Browser unavailable');
-  if(message.type==='mouse') {
+  if(message.type==='resize') {
+    viewerSize={width:Math.max(320,Math.min(1920,Math.round(number(message.width,1,10000)))),height:Math.max(240,Math.min(2160,Math.round(number(message.height,1,10000))))};
+    await cdp.call('Emulation.setDeviceMetricsOverride',{...viewerSize,deviceScaleFactor:1,mobile:false});
+  } else if(message.type==='mouse') {
     if(!['mouseMoved','mousePressed','mouseReleased'].includes(message.event))throw new Error('Invalid mouse event');
     const button=['none','left','middle','right'].includes(message.button)?message.button:'none';
     await cdp.call('Input.dispatchMouseEvent',{type:message.event,x:number(message.x,0,10000),y:number(message.y,0,10000),button,buttons:number(message.buttons||0,0,7),clickCount:message.event==='mouseMoved'?0:number(message.clickCount||1,1,3),modifiers:number(message.modifiers||0,0,15)});
