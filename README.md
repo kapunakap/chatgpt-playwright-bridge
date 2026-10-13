@@ -243,6 +243,12 @@ The screen starts **read-only**. Check **Enable control**, use **+ New tab** and
 **Website address** field followed by **Go** to open sites. Back, Forward and
 Reload use the same tab. You can sign in yourself through normal website login
 forms; ChatGPT sees the resulting session in the same persistent profile.
+The screen fills the available width and height; enabling control resizes the
+shared Chromium viewport to match. **Stream: Faster** uses lighter JPEG frames;
+choose **Sharper** for more detail. Both preserve the page layout and input
+coordinates. Display acknowledgments bound queued image traffic to two frames
+plus the latest pending image. Hidden viewer tabs pause streaming when no other
+viewer is visible. Scroll bursts are coalesced while preserving key/click order.
 This viewer does not include native Chromium settings, file dialogs or password
 manager UI. For a full browser desktop, noVNC + Xvfb is the established option;
 [xtr-dev/mcp-playwright-novnc](https://github.com/xtr-dev/mcp-playwright-novnc)

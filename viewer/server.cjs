@@ -5,12 +5,16 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const { wsServer } = require('/app/node_modules/playwright-core/lib/utilsBundle.js');
 const { createClient, extractJsonObject } = require('/opt/tab-reaper.cjs');
+const { FrameQueue } = require('./frame-queue.cjs');
 const PORT = Number(process.env.LIVE_VIEW_PORT || 6080);
 const ACCESS = process.env.LIVE_VIEW_ACCESS || '/run/live-view/access.json';
 const MCP = process.env.LIVE_VIEW_MCP_URL || 'http://127.0.0.1:8931/mcp';
 const clients = new Set();
 let controller = null, cdp = null, target = '', tabs = [], busy = false;
 let viewerSize;
+let streamQuality='faster',streamOperations=Promise.resolve();
+const streamProfiles={faster:{quality:55,maxWidth:1440,maxHeight:1440},sharper:{quality:75,maxWidth:1920,maxHeight:2160}};
+function visibleClients(){return [...clients].some(ws=>ws.visible);}
 function access(token) {
   try {
     const a = JSON.parse(fs.readFileSync(ACCESS, 'utf8'));
@@ -23,8 +27,8 @@ function localRequest(req, requireOrigin = false) {
   if (!/^(127\.0\.0\.1|localhost):\d+$/.test(host)) return false;
   return (!requireOrigin && !req.headers.origin) || req.headers.origin === `http://${host}`;
 }
-function send(ws, message) { if (ws.readyState === 1 && ws.bufferedAmount < (message.type==='frame'?64*1024:1024*1024)) ws.send(JSON.stringify(message)); }
-function broadcast(message) { for (const ws of clients) send(ws, message); }
+function send(ws, message) { if (ws.readyState === 1 && ws.bufferedAmount < (message.type==='frame'?64*1024:1024*1024)){ws.send(JSON.stringify(message));return true;}return false; }
+function broadcast(message) { for (const ws of clients)if(message.type==='frame')ws.frames.offer(message);else send(ws, message); }
 let mcpClient;
 async function tool(name, args) {
   for(let attempt=0; attempt<2; attempt++) {
@@ -41,15 +45,26 @@ async function tool(name, args) {
 }
 async function state() {
   const result = await tool('browser_run_code_unsafe', {code:`async (page) => {
-    const pages = page.context().pages(); const tabs = [];
+    const context=page.context(),key=Symbol.for('chatgpt.playwright.live-view.targets');
+    const cache=context[key]||(context[key]=new WeakMap());
+    const pages = context.pages(); const tabs = [];
     for (let index=0; index<pages.length; index++) {
-      const p=pages[index]; const s=await p.context().newCDPSession(p);
-      try { const {targetInfo}=await s.send('Target.getTargetInfo');
-        tabs.push({id:targetInfo.targetId,index,title:targetInfo.title,url:targetInfo.url,current:p===page});
-      } finally {await s.detach();}
+      const p=pages[index];let id=cache.get(p);
+      if(!id){const s=await context.newCDPSession(p);try{id=(await s.send('Target.getTargetInfo')).targetInfo.targetId;cache.set(p,id);}finally{await s.detach();}}
+      tabs.push({id,index,current:p===page});
     } return {tabs};
   }`});
-  return JSON.parse(extractJsonObject(result.content.filter(x=>x.type==='text').map(x=>x.text).join('\n'))).tabs;
+  const selected=JSON.parse(extractJsonObject(result.content.filter(x=>x.type==='text').map(x=>x.text).join('\n'))).tabs;
+  const live=await (await fetch('http://127.0.0.1:9222/json/list',{signal:AbortSignal.timeout(3000)})).json();
+  return selected.map(t=>{const meta=live.find(p=>p.id===t.id);return {id:t.id,index:t.index,title:meta?.title||'',url:meta?.url||'about:blank',current:t.current};});
+}
+function updateStream() {
+  streamOperations=streamOperations.catch(()=>{}).then(async()=>{
+    const c=cdp;if(!c)return;
+    const profile=streamProfiles[streamQuality],key=JSON.stringify(profile),visible=visibleClients();
+    if(c.streamKey&&(!visible||c.streamKey!==key)){await c.call('Page.stopScreencast');c.streamKey='';}
+    if(visible&&!c.streamKey){await c.call('Page.startScreencast',{format:'jpeg',...profile,everyNthFrame:1});c.streamKey=key;}
+  });return streamOperations;
 }
 class CDP {
   constructor(url) {
@@ -79,7 +94,7 @@ async function attach(id) {
   const next=new CDP(found.webSocketDebuggerUrl);await next.ready; cdp=next;target=id;
   await next.call('Page.enable');
   if(viewerSize)await next.call('Emulation.setDeviceMetricsOverride',{...viewerSize,deviceScaleFactor:1,mobile:false});
-  await next.call('Page.startScreencast',{format:'jpeg',quality:70,maxWidth:1920,maxHeight:2160,everyNthFrame:1});
+  await updateStream();
 }
 function number(n, min, max){if(!Number.isFinite(n)||n<min||n>max)throw new Error('Invalid input');return n;}
 function websiteURL(value) {
@@ -91,7 +106,10 @@ function websiteURL(value) {
 }
 async function input(message) {
   if(!cdp) throw new Error('Browser unavailable');
-  if(message.type==='resize') {
+  if(message.type==='quality') {
+    if(!Object.hasOwn(streamProfiles,message.quality))throw new Error('Invalid quality');
+    streamQuality=message.quality;await updateStream();broadcast({type:'quality',quality:streamQuality});
+  } else if(message.type==='resize') {
     viewerSize={width:Math.max(320,Math.min(1920,Math.round(number(message.width,1,10000)))),height:Math.max(240,Math.min(2160,Math.round(number(message.height,1,10000))))};
     await cdp.call('Emulation.setDeviceMetricsOverride',{...viewerSize,deviceScaleFactor:1,mobile:false});
   } else if(message.type==='mouse') {
@@ -138,7 +156,7 @@ async function input(message) {
 }
 let metadataBusy=false;
 async function refreshMetadata() {
-  if(metadataBusy||!clients.size||!cdp)return;metadataBusy=true;
+  if(metadataBusy||!visibleClients()||!cdp)return;metadataBusy=true;
   try {
     const live=await (await fetch('http://127.0.0.1:9222/json/list',{signal:AbortSignal.timeout(3000)})).json();
     const pages=live.filter(t=>t.type==='page');
@@ -150,7 +168,7 @@ async function refreshMetadata() {
   finally{metadataBusy=false;}
 }
 async function refresh() {
-  if(busy||!clients.size)return;busy=true;
+  if(busy||!visibleClients())return;busy=true;
   try {
     tabs=await state(); const current=tabs.find(t=>t.current)||tabs[0];
     if(current)await attach(current.id);
@@ -175,10 +193,16 @@ server.on('upgrade',(req,socket,head)=>{
   wss.handleUpgrade(req,socket,head,ws=>{ws.token=protocols[1];wss.emit('connection',ws);});
 });
 wss.on('connection',ws=>{
-  clients.add(ws);send(ws,{type:'status',message:'Connected — read-only'});refresh();
+  ws.visible=true;ws.frames=new FrameQueue(frame=>send(ws,frame));
+  clients.add(ws);send(ws,{type:'status',message:'Connected — read-only'});send(ws,{type:'quality',quality:streamQuality});refresh();
   let commands=Promise.resolve(),draining=false;const inputs=[];
   async function handle(m) {
     if(!access(ws.token)){ws.close(1008,'Access expired');return;}
+    if(m.type==='frame-ack'){if(Number.isSafeInteger(m.frameId))ws.frames.acknowledge(m.frameId);return;}
+    if(m.type==='visibility'){
+      ws.visible=m.visible===true;if(ws.visible)ws.frames.resume();else ws.frames.pause();
+      await updateStream();if(ws.visible)await refresh();return;
+    }
     if(m.type==='control'){
       if(m.enabled){if(controller&&controller!==ws)throw new Error('Another viewer has control');controller=ws;}else if(controller===ws)controller=null;
       send(ws,{type:'control',enabled:controller===ws});return;
@@ -192,10 +216,13 @@ wss.on('connection',ws=>{
   }
   ws.on('message',data=>{
     let m;try{m=JSON.parse(data.toString());}catch{return;}
-    if(['mouse','wheel','key','text','control'].includes(m.type)){
+    // Display acknowledgments must not wait behind an in-progress CDP input.
+    if(m.type==='frame-ack'){if(access(ws.token)&&Number.isSafeInteger(m.frameId))ws.frames.acknowledge(m.frameId);return;}
+    if(['mouse','wheel','key','text','control','frame-ack','visibility'].includes(m.type)){
       // Keep key/click order, but replace obsolete hover moves instead of replaying a backlog.
       const last=inputs.at(-1);
       if(m.type==='mouse'&&m.event==='mouseMoved'&&last?.type==='mouse'&&last.event==='mouseMoved')inputs[inputs.length-1]=m;
+      else if(m.type==='wheel'&&last?.type==='wheel'&&[m.dx,m.dy,last.dx,last.dy].every(Number.isFinite))inputs[inputs.length-1]={...m,dx:Math.max(-10000,Math.min(10000,last.dx+m.dx)),dy:Math.max(-10000,Math.min(10000,last.dy+m.dy))};
       else inputs.push(m);
       drain();
     }else{
@@ -203,7 +230,7 @@ wss.on('connection',ws=>{
       commands=commands.then(()=>handle(m)).catch(()=>send(ws,{type:'status',message:'Action unavailable; check control and connection'}));
     }
   });
-  ws.on('close',()=>{clients.delete(ws);if(controller===ws)controller=null;if(!clients.size&&cdp){const old=cdp;cdp=null;target='';old.call('Page.stopScreencast').finally(()=>old.close()).catch(()=>{});}});
+  ws.on('close',()=>{ws.frames.pause();clients.delete(ws);if(controller===ws)controller=null;if(!clients.size&&cdp){const old=cdp;cdp=null;target='';old.call('Page.stopScreencast').finally(()=>old.close()).catch(()=>{});}else updateStream().catch(()=>{});});
 });
 const timer=setInterval(()=>{for(const ws of clients)if(!access(ws.token))ws.close(1008,'Access expired');refresh();},1500);
 const metadataTimer=setInterval(refreshMetadata,500);

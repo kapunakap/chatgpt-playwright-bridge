@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 FILES = ("docker-compose.yml", "mcp-proxy.conf", "scripts/start.sh", "scripts/bootstrap.sh",
          "scripts/smoke-test.sh", "scripts/mcp-smoke.cjs", "scripts/recover-profile.py",
          "scripts/install-observability.sh", "scripts/tab-reaper.cjs")
-METADATA_FILES = ("viewer/server.cjs", "viewer/index.html", "viewer/client.js", "viewer/style.css",
+METADATA_FILES = ("viewer/server.cjs", "viewer/index.html", "viewer/client.js", "viewer/style.css", "viewer/frame-queue.cjs",
                   "playwright-config.json", "scripts/patch-tabs.cjs", "scripts/playwright-entrypoint.sh", "scripts/resource-sample.py")
 
 

@@ -20,7 +20,7 @@ async function main(){
  try {
   console.log('fixture');
   const denied=await new Promise(resolve=>{const bad=new WebSocket('ws://127.0.0.1:6080/ws',['live-view','invalid'],{origin:'http://127.0.0.1:6080'});bad.on('unexpected-response',(_,r)=>{resolve(r.statusCode);r.resume();});bad.on('error',()=>{});});assert.equal(denied,403);console.log('auth');
-  ws=new WebSocket('ws://127.0.0.1:6080/ws',['live-view',token],{origin:'http://127.0.0.1:6080'});ws.on('message',d=>messages.push(JSON.parse(d)));await new Promise((resolve,reject)=>{ws.on('open',resolve);ws.on('error',reject);});
+  ws=new WebSocket('ws://127.0.0.1:6080/ws',['live-view',token],{origin:'http://127.0.0.1:6080'});ws.on('message',d=>{const m=JSON.parse(d);messages.push(m);if(m.type==='frame')ws.send(JSON.stringify({type:'frame-ack',frameId:m.frameId}));});await new Promise((resolve,reject)=>{ws.on('open',resolve);ws.on('error',reject);});
   console.log('websocket');
   const frame=await waitFor(()=>messages.find(x=>x.type==='frame'));assert.equal(Buffer.from(frame.data,'base64').subarray(0,2).toString('hex'),'ffd8');
   await waitFor(()=>messages.find(x=>x.type==='state'));
