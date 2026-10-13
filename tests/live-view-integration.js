@@ -49,13 +49,23 @@ async function main(){
    await new Promise(r=>setTimeout(r,300));
    assert.equal((await run('async page=>({value:await page.locator("#input").inputValue()})')).value,'mcp-to-viewer-ui');
    await viewer.screenshot({path:'/tmp/live-view-ui.png'});
-   await viewer.locator('#tabs button').nth(original.index).click();
+   await viewer.locator('#tabs .tab-select').nth(original.index).click();
    await new Promise(r=>setTimeout(r,1600));
    assert.equal((await run('async page=>({index:page.context().pages().indexOf(page)})')).index,original.index);
+   // Closing a fixture from the rendered viewer must close only that shared target.
+   await client.request('tools/call',{name:'browser_tabs',arguments:{action:'new'}});
+   await run('async page=>{await page.setContent("<title>Close tab QA</title>");return {ok:true};}');
+   await viewer.getByRole('button',{name:'Close tab: Close tab QA',exact:true}).click();
+   for(let attempt=0;attempt<50;attempt++){
+     const gone=await run('async page=>({gone:!(await Promise.all(page.context().pages().map(p=>p.title()))).includes("Close tab QA")})');
+     if(gone.gone)break;
+     if(attempt===49)throw new Error('Viewer close did not close shared tab');
+     await new Promise(r=>setTimeout(r,100));
+   }
    await viewer.reload();await viewer.locator('#status').filter({hasText:'Connected'}).waitFor();
   } finally {await viewer.close();await browser.close();}
-  console.log('Rendered viewer UI click, typing, tabs and refresh passed');
-  console.log(JSON.stringify({passed:true,authDenied:denied,jpegFrames:messages.filter(x=>x.type==='frame').length,readOnly:true,mouse:true,keyboard:true,scroll:true,tabs:true,mcpToViewer:true,viewerToMcp:true,renderedUI:true}));
+  console.log('Rendered viewer UI click, typing, tabs, close and refresh passed');
+  console.log(JSON.stringify({passed:true,authDenied:denied,jpegFrames:messages.filter(x=>x.type==='frame').length,readOnly:true,mouse:true,keyboard:true,scroll:true,tabs:true,mcpToViewer:true,viewerToMcp:true,renderedUI:true,closeTab:true}));
  } finally {
   if(ws)ws.close();await client.request('tools/call',{name:'browser_tabs',arguments:{action:'close',index:fixtureIndex}});await client.request('tools/call',{name:'browser_tabs',arguments:{action:'select',index:original.index}});
   // Keep the shared MCP session: deleting the last client closes Chromium upstream.

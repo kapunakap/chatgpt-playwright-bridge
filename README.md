@@ -240,7 +240,9 @@ instance and `AWS-RunShellScript`, command status/wait permissions, and
 Use your existing authorized operator role; the EC2 role is unchanged.
 
 The screen starts **read-only**. Check **Enable control**, then click the screen
-and type or scroll. Click the tab buttons to select an existing tab. Paste text
+and type or scroll. Click the tab buttons to select an existing tab. Each tab has an **×** close button,
+enabled when you have control. Closing the last tab leaves a new blank tab in the
+same profile. Closing is immediate and discards unsaved page state. Paste text
 uses the Mac clipboard when permitted, with a text prompt fallback. Refresh
 reconnects the stream; running the launcher again renews access and invalidates
 older viewer credentials. One viewer can control at a time. ChatGPT and the human

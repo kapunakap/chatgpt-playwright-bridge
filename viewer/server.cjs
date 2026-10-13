@@ -97,6 +97,19 @@ async function input(message) {
   } else if(message.type==='tab') {
     const tab=tabs.find(t=>t.id===message.id);if(!tab)throw new Error('Tab unavailable');
     await tool('browser_tabs',{action:'select',index:tab.index});await refresh();
+  } else if(message.type==='close-tab') {
+    if(typeof message.id!=='string'||!/^[A-Fa-f0-9]{16,64}$/.test(message.id))throw new Error('Invalid tab');
+    // Resolve a stable CDP target, never a cached tab index that could close another tab.
+    await tool('browser_run_code_unsafe',{code:`async page=>{
+      const context=page.context();let selected;
+      for(const p of context.pages()){
+        const session=await context.newCDPSession(p);
+        try{const {targetInfo}=await session.send('Target.getTargetInfo');if(targetInfo.targetId===${JSON.stringify(message.id)})selected=p;}finally{await session.detach();}
+      }
+      if(!selected)return {closed:false};
+      if(context.pages().length===1)await context.newPage();
+      await selected.close({runBeforeUnload:false});return {closed:true};
+    }`});await refresh();
   } else throw new Error('Invalid action');
 }
 async function refresh() {

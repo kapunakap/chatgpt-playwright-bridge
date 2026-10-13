@@ -9,8 +9,15 @@ function connect(){
     const m=JSON.parse(event.data);
     if(m.type==='frame'&&!frameBusy){viewportWidth=m.metadata.deviceWidth;viewportHeight=m.metadata.deviceHeight;frameBusy=true;const img=new Image();img.onload=()=>{canvas.width=img.width;canvas.height=img.height;ctx.drawImage(img,0,0);frameBusy=false;};img.onerror=()=>{frameBusy=false;};img.src=`data:image/jpeg;base64,${m.data}`;}
     if(m.type==='status')status.textContent=m.message;
-    if(m.type==='control'){enabled=m.enabled;control.checked=enabled;status.textContent=enabled?'Connected — you have control':'Connected — read-only';canvas.focus();}
-    if(m.type==='state'){status.textContent=enabled?'Connected — you have control':m.controller?'Connected — another viewer controls':'Connected — read-only';const signature=JSON.stringify(m.tabs);if(signature!==tabSignature){tabSignature=signature;nav.replaceChildren(...m.tabs.map(t=>{const b=document.createElement('button');b.textContent=t.title||t.url||'Blank tab';b.title=t.url;b.className=t.current?'active':'';b.onclick=()=>{if(enabled)send({type:'tab',id:t.id});else status.textContent='Enable control to switch tabs';};return b;}));}}
+    if(m.type==='control'){enabled=m.enabled;control.checked=enabled;status.textContent=enabled?'Connected — you have control':'Connected — read-only';nav.querySelectorAll('.tab-close').forEach(b=>{b.disabled=!enabled;});canvas.focus();}
+    if(m.type==='state'){status.textContent=enabled?'Connected — you have control':m.controller?'Connected — another viewer controls':'Connected — read-only';const signature=JSON.stringify(m.tabs);if(signature!==tabSignature){tabSignature=signature;nav.replaceChildren(...m.tabs.map(t=>{
+      const group=document.createElement('span');group.className='tab-group';
+      const b=document.createElement('button');b.textContent=t.title||t.url||'Blank tab';b.title=t.url;b.className='tab-select'+(t.current?' active':'');
+      b.onclick=()=>{if(enabled)send({type:'tab',id:t.id});else status.textContent='Enable control to switch tabs';};
+      const close=document.createElement('button');close.className='tab-close';close.textContent='×';close.title='Close tab';close.setAttribute('aria-label','Close tab: '+(t.title||t.url||'Blank tab'));close.disabled=!enabled;
+      close.onclick=()=>{if(enabled)send({type:'close-tab',id:t.id});};
+      group.append(b,close);return group;
+    }));}}
   };
   ws.onclose=e=>{enabled=false;control.checked=false;status.textContent=e.code===1008?'Access expired — run the launcher again':'Disconnected — reconnecting';if(e.code!==1008)setTimeout(connect,2000);};
   ws.onerror=()=>{status.textContent='Access denied or connection unavailable — run the launcher again';};
