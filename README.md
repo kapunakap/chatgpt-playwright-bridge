@@ -14,7 +14,7 @@ The MCP port is never published to the Internet. The EC2 security group has no i
 - AWS region: `us-east-1`
 - EC2: `t4g.medium` (ARM64/Graviton, 4 GiB RAM)
 - OS: Amazon Linux 2023, kernel 6.1 AMI family
-- Playwright MCP: `mcr.microsoft.com/playwright/mcp:v0.0.79`
+- Playwright MCP: `v0.0.82`, pinned to the ARM64-compatible digest already used by this deployment
 - Playwright MCP heartbeat: disabled with `PLAYWRIGHT_MCP_PING_TIMEOUT_MS=0`
 - Stale-tab reaper: enabled with `TAB_REAPER_IDLE_MS=1800000` (30 minutes) and `TAB_REAPER_INTERVAL_MS=60000` (60 seconds)
 - OpenAI tunnel-client: official stable v0.0.11 GHCR ARM64 digest `ghcr.io/openai/tunnel-client@sha256:c22610c17e4f624fa8114fb93d7d5df915ce7a4d3fe115a6c41ba4677ea54819`
@@ -107,7 +107,7 @@ Useful overrides:
 InstanceType=t4g.medium
 Architecture=arm64
 VolumeSize=20
-PlaywrightMcpImage=mcr.microsoft.com/playwright/mcp:v0.0.79
+PlaywrightMcpImage=mcr.microsoft.com/playwright/mcp@sha256:77dccc5ce9e94cb8ae7ebea87ddbb6cd54b05760c4d63c54e16accf2726b8734
 TunnelClientImage=ghcr.io/openai/tunnel-client@sha256:c22610c17e4f624fa8114fb93d7d5df915ce7a4d3fe115a6c41ba4677ea54819
 ```
 
@@ -221,6 +221,100 @@ that the compressed CloudFormation boot payload matches the source files.
 For an existing instance, install the reviewed files through SSM; user-data
 updates do not replace that deployment step. Preserve the deployed AMI and
 reject any change set that replaces the existing instance or volume.
+
+## Interactive live browser screen
+
+From the repository on your Mac, with AWS CLI and Session Manager plugin installed:
+
+```bash
+AWS_PROFILE=your-profile ./scripts/open-live-view.sh
+```
+
+The helper resolves the existing instance from `playwright-mcp-aws` in `us-east-1`,
+creates an eight-hour viewer credential, starts SSM port forwarding, and opens
+Google Chrome. Keep that terminal running; Ctrl+C closes forwarding. If needed,
+set `LIVE_VIEW_LOCAL_PORT=6081`, `LIVE_VIEW_STACK`, or `LIVE_VIEW_INSTANCE`.
+The operator needs `cloudformation:DescribeStacks`, SSM `SendCommand` for this
+instance and `AWS-RunShellScript`, command status/wait permissions, and
+`StartSession` for `AWS-StartPortForwardingSession` plus session termination.
+Use your existing authorized operator role; the EC2 role is unchanged.
+
+The screen starts **read-only**. Check **Enable control**, use **+ New tab** and the
+**Website address** field followed by **Go** to open sites. Back, Forward and
+Reload use the same tab. You can sign in yourself through normal website login
+forms; ChatGPT sees the resulting session in the same persistent profile.
+The screen fills the available width and height; enabling control resizes the
+shared Chromium viewport to match. **Stream: Faster** uses lighter JPEG frames;
+choose **Sharper** for more detail. Both preserve the page layout and input
+coordinates. Display acknowledgments bound queued image traffic to two frames
+plus the latest pending image. Hidden viewer tabs pause streaming when no other
+viewer is visible. Scroll bursts are coalesced while preserving key/click order.
+This viewer does not include native Chromium settings, file dialogs or password
+manager UI. For a full browser desktop, noVNC + Xvfb is the established option;
+[xtr-dev/mcp-playwright-novnc](https://github.com/xtr-dev/mcp-playwright-novnc)
+is an existing Playwright MCP integration reference, not an adopted dependency.
+A headed-display migration would require another controlled Chromium restart.
+Then click the screen
+and type or scroll. Click the tab buttons to select an existing tab. Each tab has an **×** close button,
+enabled when you have control. Closing the last tab leaves a new blank tab in the
+same profile. Closing is immediate and discards unsaved page state. Paste text
+uses the Mac clipboard when permitted, with a text prompt fallback. Refresh
+reconnects the stream; running the launcher again renews access and invalidates
+older viewer credentials. One viewer can control at a time. ChatGPT and the human
+share input; pause ChatGPT before editing sensitive forms. There is no automation
+lock or arbitration against ChatGPT actions.
+
+This uses Chrome DevTools Protocol `Page.startScreencast` and input events,
+with the open-source `ws` code already bundled in the pinned Playwright image.
+It attaches to the Chromium process launched by MCP and never launches another
+browser, desktop, display server, or profile. The viewer follows MCP's selected
+tab. Its tab selection uses MCP itself, and the existing deployed shared-tab
+compatibility patch now synchronizes already initialized clients as well.
+
+Only `127.0.0.1:6080` is published on EC2. CDP `9222` is on container loopback,
+shared only with the viewer's network namespace, and is never published. The
+viewer checks Host, WebSocket Origin and a temporary bearer credential before
+streaming or accepting input; arbitrary CDP commands are not forwarded. The
+credential is passed in a URL fragment, removed from the address bar, and sent
+in the WebSocket protocol header. Only its SHA-256 hash and expiry enter SSM
+command history. `/run` credentials vanish on EC2 reboot. No security-group
+rule, paid service, public listener, OpenAI tunnel change, or extra EC2 is needed.
+An authenticated public HTTPS viewer is deferred; the MCP tunnel is not used as
+an HTTP viewer proxy.
+
+The viewer has a 128 MiB RAM cap and stops screencasting when nobody is watching.
+It touches the existing tab-reaper activity marker while displaying a tab, so
+read-only viewing protects that tab too. It retains its upstream MCP session:
+upstream deletes the shared browser when its last client is deleted. Restarting
+only the viewer does not delete that MCP session or close Chromium. After
+recreating the Playwright container, also recreate `live-view`, because it shares
+that container's network namespace. Reconnect the tunnel after an MCP restart
+if the client still holds a terminated MCP session.
+
+For a first installation on an existing instance, back up its runtime files,
+stop new browser work, save tab URLs/selection and cookie hashes through
+`scripts/live-view-maintenance.cjs`, then install the runtime files through SSM.
+Enable the private CDP launch configuration with one graceful browser restart,
+restore tabs, and verify the profile. Tabs reload during this first restart;
+unsaved page/form state cannot survive a Chromium restart. No profile recovery,
+profile deletion, `--isolated`, instance replacement, or volume replacement is
+part of this rollout. Keep the deployed `.env` and local overrides.
+
+New instances receive the larger viewer files through CloudFormation Init
+metadata; `scripts/sync-template.py` checks both the compressed payload and
+metadata against source, keeping EC2 user data below 15 KiB. Existing-instance
+rollouts copy reviewed files directly; changing user data is not a runtime
+installation step.
+
+`tests/live-view-integration.js` runs inside a **separate temporary driver
+container**, with the existing Chromium only. It requires a temporary
+`/run/live-view/test-token` matching `access.json`, and must run in a maintenance
+window: it creates a fixture tab, proves input and streaming in both directions,
+rejects unauthorized access and read-only input, exercises the rendered viewer
+UI, and closes its fixture. Run it with `docker compose run --rm --no-deps
+--entrypoint node live-view /opt/viewer/integration.cjs` after copying the driver
+there through SSM. Do not run the driver with `docker exec` inside the viewer's
+memory budget. No page contents, cookies, tokens, titles or URLs are logged.
 
 ## Security notes
 

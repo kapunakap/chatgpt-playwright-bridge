@@ -4,6 +4,7 @@ import argparse
 import base64
 import gzip
 import io
+import json
 from pathlib import Path
 import re
 import tarfile
@@ -11,7 +12,9 @@ import tarfile
 ROOT = Path(__file__).resolve().parent.parent
 FILES = ("docker-compose.yml", "mcp-proxy.conf", "scripts/start.sh", "scripts/bootstrap.sh",
          "scripts/smoke-test.sh", "scripts/mcp-smoke.cjs", "scripts/recover-profile.py",
-         "scripts/resource-sample.py", "scripts/install-observability.sh", "scripts/tab-reaper.cjs")
+         "scripts/install-observability.sh", "scripts/tab-reaper.cjs")
+METADATA_FILES = ("viewer/server.cjs", "viewer/index.html", "viewer/client.js", "viewer/style.css", "viewer/frame-queue.cjs",
+                  "playwright-config.json", "scripts/patch-tabs.cjs", "scripts/playwright-entrypoint.sh", "scripts/resource-sample.py")
 
 
 def compressed(data):
@@ -80,6 +83,8 @@ def user_data_bytes(text):
 
 
 def validate_template(text):
+    if metadata_block() not in text:
+        raise RuntimeError("Viewer metadata differs from source files")
     _, bundle = embedded_archive(text)
     if not archive_matches_sources(bundle):
         raise RuntimeError("Embedded runtime archive differs from FILES")
@@ -96,11 +101,23 @@ def check_template(text):
     return validate_template(text)
 
 
+def metadata_block():
+    lines = ["    # BEGIN GENERATED VIEWER METADATA", "    Metadata:", "      AWS::CloudFormation::Init:", "        config:", "          files:"]
+    for name in METADATA_FILES:
+        lines += ['            "/tmp/playwright-mcp-aws/' + name + '":',
+                  "              content: " + json.dumps((ROOT / name).read_text()),
+                  '              mode: "000644"', '              owner: root', '              group: root']
+    lines.append("    # END GENERATED VIEWER METADATA")
+    return "\n".join(lines) + "\n"
+
+
 def synced_template(text=None):
     text = (ROOT / "infra/cloudformation.yaml").read_text() if text is None else text
     match, bundle = embedded_archive(text)
     encoded = match.group("encoded") if archive_matches_sources(bundle) else base64.b64encode(runtime_bundle()).decode()
     updated = text[:match.start()] + runtime_block(encoded) + text[match.end():]
+    pattern = r"(?ms)^    # BEGIN GENERATED VIEWER METADATA\n.*?^    # END GENERATED VIEWER METADATA\n"
+    updated = re.sub(pattern, lambda _: metadata_block(), updated)
     validate_template(updated)
     return updated
 
