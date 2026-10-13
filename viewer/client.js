@@ -1,6 +1,6 @@
 'use strict';
 const canvas=document.querySelector('#screen'),ctx=canvas.getContext('2d'),status=document.querySelector('#status'),control=document.querySelector('#control'),nav=document.querySelector('#tabs');
-const token=location.hash.slice(1);history.replaceState(null,'',location.pathname);let enabled=false,ws,frameBusy=false,viewportWidth=1280,viewportHeight=720;
+const token=location.hash.slice(1)||sessionStorage.getItem('live-view-token');if(location.hash)sessionStorage.setItem('live-view-token',token);history.replaceState(null,'',location.pathname);let enabled=false,ws,frameBusy=false,tabSignature="",viewportWidth=1280,viewportHeight=720;
 function send(m){if(ws?.readyState===1)ws.send(JSON.stringify(m));}
 function connect(){
   if(!token){status.textContent='Open using scripts/open-live-view.sh to authorize access';return;}
@@ -10,7 +10,7 @@ function connect(){
     if(m.type==='frame'&&!frameBusy){viewportWidth=m.metadata.deviceWidth;viewportHeight=m.metadata.deviceHeight;frameBusy=true;const img=new Image();img.onload=()=>{canvas.width=img.width;canvas.height=img.height;ctx.drawImage(img,0,0);frameBusy=false;};img.onerror=()=>{frameBusy=false;};img.src=`data:image/jpeg;base64,${m.data}`;}
     if(m.type==='status')status.textContent=m.message;
     if(m.type==='control'){enabled=m.enabled;control.checked=enabled;status.textContent=enabled?'Connected — you have control':'Connected — read-only';canvas.focus();}
-    if(m.type==='state'){status.textContent=enabled?'Connected — you have control':m.controller?'Connected — another viewer controls':'Connected — read-only';nav.replaceChildren(...m.tabs.map(t=>{const b=document.createElement('button');b.textContent=t.title||t.url||'Blank tab';b.title=t.url;b.className=t.current?'active':'';b.onclick=()=>{if(enabled)send({type:'tab',id:t.id});else status.textContent='Enable control to switch tabs';};return b;}));}
+    if(m.type==='state'){status.textContent=enabled?'Connected — you have control':m.controller?'Connected — another viewer controls':'Connected — read-only';const signature=JSON.stringify(m.tabs);if(signature!==tabSignature){tabSignature=signature;nav.replaceChildren(...m.tabs.map(t=>{const b=document.createElement('button');b.textContent=t.title||t.url||'Blank tab';b.title=t.url;b.className=t.current?'active':'';b.onclick=()=>{if(enabled)send({type:'tab',id:t.id});else status.textContent='Enable control to switch tabs';};return b;}));}}
   };
   ws.onclose=e=>{enabled=false;control.checked=false;status.textContent=e.code===1008?'Access expired — run the launcher again':'Disconnected — reconnecting';if(e.code!==1008)setTimeout(connect,2000);};
   ws.onerror=()=>{status.textContent='Access denied or connection unavailable — run the launcher again';};
