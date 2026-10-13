@@ -22,7 +22,7 @@ function localRequest(req, requireOrigin = false) {
   if (!/^(127\.0\.0\.1|localhost):\d+$/.test(host)) return false;
   return (!requireOrigin && !req.headers.origin) || req.headers.origin === `http://${host}`;
 }
-function send(ws, message) { if (ws.readyState === 1 && ws.bufferedAmount < 1024 * 1024) ws.send(JSON.stringify(message)); }
+function send(ws, message) { if (ws.readyState === 1 && ws.bufferedAmount < (message.type==='frame'?64*1024:1024*1024)) ws.send(JSON.stringify(message)); }
 function broadcast(message) { for (const ws of clients) send(ws, message); }
 let mcpClient;
 async function tool(name, args) {
@@ -107,7 +107,8 @@ async function input(message) {
   } else if(message.type==='new-tab') {
     await tool('browser_tabs',{action:'new'});await refresh();
   } else if(message.type==='navigate') {
-    await tool('browser_navigate',{url:websiteURL(message.url)});await refresh();
+    // Avoid the additional MCP page-load and settling waits for human navigation.
+    await cdp.call('Page.navigate',{url:websiteURL(message.url)});await refreshMetadata();
   } else if(message.type==='reload') {
     await cdp.call('Page.reload');
   } else if(message.type==='history') {
@@ -129,6 +130,19 @@ async function input(message) {
       await selected.close({runBeforeUnload:false});return {closed:true};
     }`});await refresh();
   } else throw new Error('Invalid action');
+}
+let metadataBusy=false;
+async function refreshMetadata() {
+  if(metadataBusy||!clients.size||!cdp)return;metadataBusy=true;
+  try {
+    const live=await (await fetch('http://127.0.0.1:9222/json/list',{signal:AbortSignal.timeout(3000)})).json();
+    const pages=live.filter(t=>t.type==='page');
+    const order=new Map(tabs.map((t,i)=>[t.id,i]));
+    pages.sort((a,b)=>(order.get(a.id)??9999)-(order.get(b.id)??9999));
+    const current=target;
+    broadcast({type:'state',tabs:pages.map((t,i)=>({id:t.id,index:tabs.find(old=>old.id===t.id)?.index??i,title:t.title,url:t.url,current:t.id===current})),controller:!!controller});
+  }catch{/* The selected-tab poll handles browser reconnects. */}
+  finally{metadataBusy=false;}
 }
 async function refresh() {
   if(busy||!clients.size)return;busy=true;
@@ -157,15 +171,36 @@ server.on('upgrade',(req,socket,head)=>{
 });
 wss.on('connection',ws=>{
   clients.add(ws);send(ws,{type:'status',message:'Connected — read-only'});refresh();
-  let chain=Promise.resolve();
-  ws.on('message',data=>{chain=chain.then(async()=>{
+  let commands=Promise.resolve(),draining=false;const inputs=[];
+  async function handle(m) {
     if(!access(ws.token)){ws.close(1008,'Access expired');return;}
-    const m=JSON.parse(data.toString());
-    if(m.type==='control'){if(m.enabled){if(controller&&controller!==ws)throw new Error('Another viewer has control');controller=ws;}else if(controller===ws)controller=null;send(ws,{type:'control',enabled:controller===ws});return;}
+    if(m.type==='control'){
+      if(m.enabled){if(controller&&controller!==ws)throw new Error('Another viewer has control');controller=ws;}else if(controller===ws)controller=null;
+      send(ws,{type:'control',enabled:controller===ws});return;
+    }
     if(controller!==ws)throw new Error('Enable control first');await input(m);
-  }).catch(()=>send(ws,{type:'status',message:'Action unavailable; check control and connection'}));});
+  }
+  async function drain() {
+    if(draining)return;draining=true;
+    try{while(inputs.length&&ws.readyState===1)await handle(inputs.shift()).catch(()=>send(ws,{type:'status',message:'Action unavailable; check control and connection'}));}
+    finally{draining=false;}
+  }
+  ws.on('message',data=>{
+    let m;try{m=JSON.parse(data.toString());}catch{return;}
+    if(['mouse','wheel','key','text','control'].includes(m.type)){
+      // Keep key/click order, but replace obsolete hover moves instead of replaying a backlog.
+      const last=inputs.at(-1);
+      if(m.type==='mouse'&&m.event==='mouseMoved'&&last?.type==='mouse'&&last.event==='mouseMoved')inputs[inputs.length-1]=m;
+      else inputs.push(m);
+      drain();
+    }else{
+      // Slow MCP tab operations must not hold up typing, clicks or scrolling.
+      commands=commands.then(()=>handle(m)).catch(()=>send(ws,{type:'status',message:'Action unavailable; check control and connection'}));
+    }
+  });
   ws.on('close',()=>{clients.delete(ws);if(controller===ws)controller=null;if(!clients.size&&cdp){const old=cdp;cdp=null;target='';old.call('Page.stopScreencast').finally(()=>old.close()).catch(()=>{});}});
 });
 const timer=setInterval(()=>{for(const ws of clients)if(!access(ws.token))ws.close(1008,'Access expired');refresh();},1500);
+const metadataTimer=setInterval(refreshMetadata,500);
 server.listen(PORT,'0.0.0.0',()=>console.log('Live viewer ready'));
-process.on('SIGTERM',()=>{clearInterval(timer);for(const ws of clients)ws.close();if(cdp)cdp.close();server.close(()=>process.exit(0));});
+process.on('SIGTERM',()=>{clearInterval(timer);clearInterval(metadataTimer);for(const ws of clients)ws.close();if(cdp)cdp.close();server.close(()=>process.exit(0));});

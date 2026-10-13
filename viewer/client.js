@@ -1,13 +1,25 @@
 'use strict';
 const canvas=document.querySelector('#screen'),ctx=canvas.getContext('2d'),address=document.querySelector('#address'),status=document.querySelector('#status'),control=document.querySelector('#control'),nav=document.querySelector('#tabs');
-const token=location.hash.slice(1)||sessionStorage.getItem('live-view-token');if(location.hash)sessionStorage.setItem('live-view-token',token);history.replaceState(null,'',location.pathname);let enabled=false,ws,frameBusy=false,tabSignature="",viewportWidth=1280,viewportHeight=720;
+const token=location.hash.slice(1)||sessionStorage.getItem('live-view-token');if(location.hash)sessionStorage.setItem('live-view-token',token);history.replaceState(null,'',location.pathname);let enabled=false,ws,frameBusy=false,latestFrame=null,tabSignature="",viewportWidth=1280,viewportHeight=720;
 function send(m){if(ws?.readyState===1)ws.send(JSON.stringify(m));}
+function paintFrame(){
+  if(frameBusy||!latestFrame)return;
+  const frame=latestFrame;latestFrame=null;frameBusy=true;
+  const img=new Image();
+  img.onload=()=>{
+    viewportWidth=frame.metadata.deviceWidth;viewportHeight=frame.metadata.deviceHeight;
+    if(canvas.width!==img.width)canvas.width=img.width;
+    if(canvas.height!==img.height)canvas.height=img.height;
+    ctx.drawImage(img,0,0);frameBusy=false;paintFrame();
+  };
+  img.onerror=()=>{frameBusy=false;paintFrame();};img.src=`data:image/jpeg;base64,${frame.data}`;
+}
 function connect(){
   if(!token){status.textContent='Open using scripts/open-live-view.sh to authorize access';return;}
   ws=new WebSocket(`ws://${location.host}/ws`,['live-view',token]);
   ws.onmessage=event=>{
     const m=JSON.parse(event.data);
-    if(m.type==='frame'&&!frameBusy){viewportWidth=m.metadata.deviceWidth;viewportHeight=m.metadata.deviceHeight;frameBusy=true;const img=new Image();img.onload=()=>{canvas.width=img.width;canvas.height=img.height;ctx.drawImage(img,0,0);frameBusy=false;};img.onerror=()=>{frameBusy=false;};img.src=`data:image/jpeg;base64,${m.data}`;}
+    if(m.type==='frame'){latestFrame=m;paintFrame();}
     if(m.type==='status')status.textContent=m.message;
     if(m.type==='control'){enabled=m.enabled;control.checked=enabled;status.textContent=enabled?'Connected — you have control':'Connected — read-only';document.querySelectorAll('.tab-close,.browser-control').forEach(b=>{b.disabled=!enabled;});canvas.focus();}
     if(m.type==='state'){const current=m.tabs.find(t=>t.current);if(current&&document.activeElement!==address)address.value=current.url;status.textContent=enabled?'Connected — you have control':m.controller?'Connected — another viewer controls':'Connected — read-only';const signature=JSON.stringify(m.tabs);if(signature!==tabSignature){tabSignature=signature;nav.replaceChildren(...m.tabs.map(t=>{
