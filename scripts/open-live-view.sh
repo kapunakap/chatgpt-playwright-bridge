@@ -59,7 +59,9 @@ for ((attempt=0; attempt<40; attempt++)); do
 done
 [[ "$ready" == true ]] || { echo 'SSM viewer forwarding did not become ready' >&2; exit 1; }
 url="http://127.0.0.1:$port/#$(cat "$work/token")"
-if [[ "$(uname -s)" == Darwin ]]; then open -a "${LIVE_VIEW_CHROME_APP:-/Applications/Google Chrome.app}" "$url"; else xdg-open "$url"; fi
+if [[ "${LIVE_VIEW_NO_OPEN:-0}" == 1 ]]; then
+  : # Automation can open Chrome through its supported browser API.
+elif [[ "$(uname -s)" == Darwin ]]; then open -a "${LIVE_VIEW_CHROME_APP:-/Applications/Google Chrome.app}" "$url"; else xdg-open "$url"; fi
 unset url
 printf 'Live browser opened. Keep this terminal running; Ctrl+C closes the SSM connection.\n'
 wait "$forward_pid"
