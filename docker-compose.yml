@@ -2,7 +2,7 @@ name: playwright-mcp-aws
 
 services:
   playwright:
-    image: ${PLAYWRIGHT_MCP_IMAGE:-mcr.microsoft.com/playwright/mcp:v0.0.79}
+    image: ${PLAYWRIGHT_MCP_IMAGE:-mcr.microsoft.com/playwright/mcp@sha256:77dccc5ce9e94cb8ae7ebea87ddbb6cd54b05760c4d63c54e16accf2726b8734}
     hostname: playwright-mcp-aws-browser
     mem_limit: 2560m
     memswap_limit: 2560m
@@ -10,7 +10,12 @@ services:
     init: true
     environment:
       PLAYWRIGHT_MCP_PING_TIMEOUT_MS: "${PLAYWRIGHT_MCP_PING_TIMEOUT_MS:-0}"
+    entrypoint: [/bin/sh, /opt/playwright-entrypoint.sh]
     command:
+      - --browser
+      - chromium
+      - --config
+      - /opt/playwright-config.json
       - --port
       - "8931"
       - --host
@@ -22,11 +27,16 @@ services:
       - /data/profile
       - --output-dir
       - /data/output
+    ports:
+      - "127.0.0.1:6080:6080"
     expose:
       - "8931"
     shm_size: 512m
     volumes:
       - ${PLAYWRIGHT_DATA_DIR:-/var/lib/playwright-mcp-aws}:/data
+      - ./playwright-config.json:/opt/playwright-config.json:ro
+      - ./playwright-entrypoint.sh:/opt/playwright-entrypoint.sh:ro
+      - ./patch-tabs.cjs:/opt/patch-tabs.cjs:ro
     healthcheck:
       test:
         - CMD-SHELL
@@ -39,6 +49,27 @@ services:
     restart: unless-stopped
     networks:
       - mcp
+
+  live-view:
+    image: ${PLAYWRIGHT_MCP_IMAGE:-mcr.microsoft.com/playwright/mcp@sha256:77dccc5ce9e94cb8ae7ebea87ddbb6cd54b05760c4d63c54e16accf2726b8734}
+    network_mode: service:playwright
+    mem_limit: 128m
+    memswap_limit: 128m
+    init: true
+    entrypoint: [node, /opt/viewer/server.cjs]
+    volumes:
+      - ./viewer:/opt/viewer:ro
+      - ./tab-reaper.cjs:/opt/tab-reaper.cjs:ro
+      - /run/playwright-live-view:/run/live-view:ro
+    depends_on:
+      playwright:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:6080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
 
   mcp-proxy:
     image: nginx:1.29.8-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
@@ -64,7 +95,7 @@ services:
       - mcp
 
   tab-reaper:
-    image: ${PLAYWRIGHT_MCP_IMAGE:-mcr.microsoft.com/playwright/mcp:v0.0.79}
+    image: ${PLAYWRIGHT_MCP_IMAGE:-mcr.microsoft.com/playwright/mcp@sha256:77dccc5ce9e94cb8ae7ebea87ddbb6cd54b05760c4d63c54e16accf2726b8734}
     mem_limit: 96m
     memswap_limit: 96m
     init: true

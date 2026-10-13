@@ -290,7 +290,7 @@ async function main() {
 
 module.exports = {
   DEFAULT_ENDPOINT, DEFAULT_IDLE_MS, DEFAULT_INTERVAL_MS, positiveInteger,
-  decodeBody, createClient, reaperCode, parseToolSummary, sweep, diagnostic,
+  decodeBody, createClient, extractJsonObject, reaperCode, parseToolSummary, sweep, diagnostic,
 };
 
 if (require.main === module)

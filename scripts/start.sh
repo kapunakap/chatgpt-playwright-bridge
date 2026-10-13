@@ -36,6 +36,8 @@ chmod 0600 "${secret_file}"
 export OPENAI_RUNTIME_API_KEY_FILE="${secret_file}"
 cd "${APP_DIR}"
 
+install -d -o 1000 -g 1000 -m 0700 /run/playwright-live-view
+
 docker compose --env-file "${ENV_FILE}" pull
 docker compose --env-file "${ENV_FILE}" up -d --remove-orphans
 

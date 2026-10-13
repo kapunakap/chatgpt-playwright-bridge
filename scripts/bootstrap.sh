@@ -8,7 +8,7 @@ SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 : "${OPENAI_TUNNEL_ID:?OPENAI_TUNNEL_ID is required}"
 : "${SSM_API_KEY_PARAMETER:?SSM_API_KEY_PARAMETER is required}"
 
-PLAYWRIGHT_MCP_IMAGE="${PLAYWRIGHT_MCP_IMAGE:-mcr.microsoft.com/playwright/mcp:v0.0.79}"
+PLAYWRIGHT_MCP_IMAGE="${PLAYWRIGHT_MCP_IMAGE:-mcr.microsoft.com/playwright/mcp@sha256:77dccc5ce9e94cb8ae7ebea87ddbb6cd54b05760c4d63c54e16accf2726b8734}"
 PLAYWRIGHT_MCP_PING_TIMEOUT_MS="${PLAYWRIGHT_MCP_PING_TIMEOUT_MS:-0}"
 TAB_REAPER_IDLE_MS="${TAB_REAPER_IDLE_MS:-1800000}"
 TAB_REAPER_INTERVAL_MS="${TAB_REAPER_INTERVAL_MS:-60000}"
@@ -47,9 +47,12 @@ docker compose version
 
 install -d -m 0755 "${APP_DIR}"
 install -m 0644 "${SOURCE_DIR}/docker-compose.yml" "${APP_DIR}/docker-compose.yml"
+install -d -m 0755 "${APP_DIR}/viewer"
+install -m 0644 "${SOURCE_DIR}/viewer/"* "${APP_DIR}/viewer/"
+install -m 0644 "${SOURCE_DIR}/playwright-config.json" "${APP_DIR}/playwright-config.json"
 install -m 0644 "${SOURCE_DIR}/mcp-proxy.conf" "${APP_DIR}/mcp-proxy.conf"
 install -m 0755 "${SOURCE_DIR}/scripts/start.sh" "${APP_DIR}/start.sh"
-for script in smoke-test.sh mcp-smoke.cjs recover-profile.py resource-sample.py install-observability.sh tab-reaper.cjs; do
+for script in smoke-test.sh mcp-smoke.cjs recover-profile.py resource-sample.py install-observability.sh tab-reaper.cjs patch-tabs.cjs playwright-entrypoint.sh; do
   install -m 0755 "${SOURCE_DIR}/scripts/${script}" "${APP_DIR}/${script}"
 done
 
