@@ -239,7 +239,16 @@ instance and `AWS-RunShellScript`, command status/wait permissions, and
 `StartSession` for `AWS-StartPortForwardingSession` plus session termination.
 Use your existing authorized operator role; the EC2 role is unchanged.
 
-The screen starts **read-only**. Check **Enable control**, then click the screen
+The screen starts **read-only**. Check **Enable control**, use **+ New tab** and the
+**Website address** field followed by **Go** to open sites. Back, Forward and
+Reload use the same tab. You can sign in yourself through normal website login
+forms; ChatGPT sees the resulting session in the same persistent profile.
+This viewer does not include native Chromium settings, file dialogs or password
+manager UI. For a full browser desktop, noVNC + Xvfb is the established option;
+[xtr-dev/mcp-playwright-novnc](https://github.com/xtr-dev/mcp-playwright-novnc)
+is an existing Playwright MCP integration reference, not an adopted dependency.
+A headed-display migration would require another controlled Chromium restart.
+Then click the screen
 and type or scroll. Click the tab buttons to select an existing tab. Each tab has an **×** close button,
 enabled when you have control. Closing the last tab leaves a new blank tab in the
 same profile. Closing is immediate and discards unsaved page state. Paste text

@@ -80,6 +80,13 @@ async function attach(id) {
   await next.call('Page.startScreencast',{format:'jpeg',quality:70,maxWidth:1600,maxHeight:1000,everyNthFrame:1});
 }
 function number(n, min, max){if(!Number.isFinite(n)||n<min||n>max)throw new Error('Invalid input');return n;}
+function websiteURL(value) {
+  if(typeof value!=='string'||value.length>8192)throw new Error('Invalid URL');
+  value=value.trim();if(value==='about:blank')return value;
+  const url=new URL(value.includes('://')?value:'https://'+value);
+  if(!['http:','https:'].includes(url.protocol)||url.username||url.password)throw new Error('Invalid URL');
+  return url.href;
+}
 async function input(message) {
   if(!cdp) throw new Error('Browser unavailable');
   if(message.type==='mouse') {
@@ -97,6 +104,17 @@ async function input(message) {
   } else if(message.type==='tab') {
     const tab=tabs.find(t=>t.id===message.id);if(!tab)throw new Error('Tab unavailable');
     await tool('browser_tabs',{action:'select',index:tab.index});await refresh();
+  } else if(message.type==='new-tab') {
+    await tool('browser_tabs',{action:'new'});await refresh();
+  } else if(message.type==='navigate') {
+    await tool('browser_navigate',{url:websiteURL(message.url)});await refresh();
+  } else if(message.type==='reload') {
+    await cdp.call('Page.reload');
+  } else if(message.type==='history') {
+    if(!['back','forward'].includes(message.direction))throw new Error('Invalid history action');
+    const history=await cdp.call('Page.getNavigationHistory');
+    const entry=history.entries[history.currentIndex+(message.direction==='back'?-1:1)];
+    if(entry)await cdp.call('Page.navigateToHistoryEntry',{entryId:entry.id});
   } else if(message.type==='close-tab') {
     if(typeof message.id!=='string'||!/^[A-Fa-f0-9]{16,64}$/.test(message.id))throw new Error('Invalid tab');
     // Resolve a stable CDP target, never a cached tab index that could close another tab.

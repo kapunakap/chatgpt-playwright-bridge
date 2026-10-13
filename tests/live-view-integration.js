@@ -62,10 +62,29 @@ async function main(){
      if(attempt===49)throw new Error('Viewer close did not close shared tab');
      await new Promise(r=>setTimeout(r,100));
    }
+   const beforeNew=(await run('async page=>({count:page.context().pages().length})')).count;
+   await viewer.getByRole('button',{name:'+ New tab',exact:true}).click();
+   let newTarget;
+   for(let attempt=0;attempt<50;attempt++){
+     const added=await run('async page=>{const s=await page.context().newCDPSession(page);try{const {targetInfo}=await s.send("Target.getTargetInfo");return {id:targetInfo.targetId,count:page.context().pages().length};}finally{await s.detach();}}');
+     if(added.count===beforeNew+1){newTarget=added.id;break;}
+     await new Promise(r=>setTimeout(r,100));
+   }
+   assert(newTarget,'New tab did not open in the shared context');
+   await viewer.getByRole('textbox',{name:'Website address'}).fill('https://example.com/?live-view-controls-test=1');
+   await viewer.getByRole('button',{name:'Go',exact:true}).click();
+   for(let attempt=0;attempt<50;attempt++){
+     const value=await run('async page=>({url:page.url()})');
+     if(value.url==='https://example.com/?live-view-controls-test=1')break;
+     if(attempt===49)throw new Error('Address bar did not navigate shared browser');
+     await new Promise(r=>setTimeout(r,100));
+   }
+   await viewer.locator('#tabs .tab-close[data-target-id="'+newTarget+'"]').click();
+   await viewer.locator('#tabs .tab-close[data-target-id="'+newTarget+'"]').waitFor({state:'detached'});
    await viewer.reload();await viewer.locator('#status').filter({hasText:'Connected'}).waitFor();
   } finally {await viewer.close();await browser.close();}
   console.log('Rendered viewer UI click, typing, tabs, close and refresh passed');
-  console.log(JSON.stringify({passed:true,authDenied:denied,jpegFrames:messages.filter(x=>x.type==='frame').length,readOnly:true,mouse:true,keyboard:true,scroll:true,tabs:true,mcpToViewer:true,viewerToMcp:true,renderedUI:true,closeTab:true}));
+  console.log(JSON.stringify({passed:true,authDenied:denied,jpegFrames:messages.filter(x=>x.type==='frame').length,readOnly:true,mouse:true,keyboard:true,scroll:true,tabs:true,mcpToViewer:true,viewerToMcp:true,renderedUI:true,closeTab:true,newTab:true,addressBar:true}));
  } finally {
   if(ws)ws.close();await client.request('tools/call',{name:'browser_tabs',arguments:{action:'close',index:fixtureIndex}});await client.request('tools/call',{name:'browser_tabs',arguments:{action:'select',index:original.index}});
   // Keep the shared MCP session: deleting the last client closes Chromium upstream.
